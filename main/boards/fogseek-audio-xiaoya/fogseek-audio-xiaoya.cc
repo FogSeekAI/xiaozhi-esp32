@@ -28,7 +28,28 @@ private:
     FogSeekLedController led_controller_;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
-    bool is_intercom_mode_active_ = false;
+    TaskHandle_t vad_monitor_task_handle_ = nullptr; // 添加一个任务句柄
+    bool is_manual_recording_ = false;               // 添加一个标志来跟踪是否正在手动录音
+
+    // 添加一个监控任务，持续确保VAD被唤醒词唤醒后保持禁用
+    void StartVadMonitorTask()
+    {
+        xTaskCreate([](void *pvParameter)
+                    {
+            FogSeekAudioAiya *instance = static_cast<FogSeekAudioAiya*>(pvParameter);
+            TickType_t lastWakeTime = xTaskGetTickCount();
+            
+            while(1) {
+                vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(1000)); // 每秒检查一次
+                
+                auto &app = Application::GetInstance();
+                // 检查当前状态，如果应用试图启用语音处理，且不在手动录音状态，则禁用它
+                if (app.GetAudioService().IsAudioProcessorRunning() && !instance->is_manual_recording_) {
+                    app.GetAudioService().EnableVoiceProcessing(false);
+                    ESP_LOGD(TAG, "VAD was re-enabled by app logic, disabling again");
+                }
+            } }, "vad_monitor_task", 2048, this, 5, &vad_monitor_task_handle_);
+    }
 
     void InitializePowerManager()
     {
@@ -48,72 +69,52 @@ private:
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
     }
 
-    void InitializeAudioOutputControl()
-    {
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0);
-    }
-
     void InitializeButtonCallbacks()
     {
-        // 对讲模式：按下开始录音，松开结束录音
+        // 长按：按下按键开始讲话，松开按键结束讲话，将内容发送给AI
         ctrl_button_.OnPressDown([this]()
                                  {
-            auto &app = Application::GetInstance();
-            
-            is_intercom_mode_active_ = true;
-            app.GetAudioService().EnableVoiceProcessing(false);
-            
-            if (app.GetDeviceState() != DeviceState::kDeviceStateListening) {
-                app.StartListening();
-            }
-            
-            ESP_LOGI(TAG, "Intercom mode started - button pressed down, VAD disabled"); });
+        auto &app = Application::GetInstance();
+
+        // 设置手动录音标志
+        is_manual_recording_ = true;
+
+        // 如果设备不在监听状态，则开始监听
+        if (app.GetDeviceState() != DeviceState::kDeviceStateListening) {
+            app.StartListening();
+        }
+        ESP_LOGI(TAG, "Started recording - button pressed down"); });
 
         ctrl_button_.OnPressUp([this]()
                                {
-            if (is_intercom_mode_active_) {
-                auto &app = Application::GetInstance();
-                
-                is_intercom_mode_active_ = false;
-                
-                if (app.GetDeviceState() == DeviceState::kDeviceStateListening) {
-                    app.StopListening();
-                }
-                
-                app.GetAudioService().EnableVoiceProcessing(true);
-                ESP_LOGI(TAG, "Intercom mode ended - button released, VAD enabled");
-            } });
+        auto &app = Application::GetInstance();
+        // 如果设备在监听状态，则停止监听
+        if (app.GetDeviceState() == DeviceState::kDeviceStateListening) {
+            app.StopListening();
+        }
+        
+        // 清除手动录音标志
+        is_manual_recording_ = false;
+        ESP_LOGI(TAG, "Stopped recording - button released"); });
 
-        // 单击：切换聊天状态
+        // 单击：进入WiFi配置模式
         ctrl_button_.OnClick([this]()
                              {
-                                 if (is_intercom_mode_active_) return;
+                             auto &app = Application::GetInstance();
+                             if (app.GetDeviceState() == DeviceState::kDeviceStateStarting)
+                             {
+                                 EnterWifiConfigMode();
+                                 return;
+                             } });
 
-                                 auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); });
-
-        // 双击：进入WiFi配置模式
+        // 双击：关机
         ctrl_button_.OnDoubleClick([this]()
                                    {
-            if (is_intercom_mode_active_) return;
-            
-            auto &app = Application::GetInstance();
-            if (app.GetDeviceState() == DeviceState::kDeviceStateStarting)
-            {
-                EnterWifiConfigMode();
-                return;
-            } });
-
-        // 三击：关机
-        ctrl_button_.OnMultipleClick([this]()
-                                     {
-            auto &app = Application::GetInstance();
-            if (is_intercom_mode_active_) return;
-            
-            ESP_LOGI(TAG, "Triple click detected, powering off device");
-            app.Alert("INFO", "关机中...", "neutral", "");
-            PowerOff(); }, 3);
+        auto &app = Application::GetInstance();
+        
+        ESP_LOGI(TAG, "Double click detected, powering off device");
+        app.Alert("INFO", "关机中...", "neutral", "");
+        PowerOff(); });
     }
 
     void HandleAutoWake()
@@ -121,10 +122,7 @@ private:
         auto &app = Application::GetInstance();
         if (app.GetDeviceState() == DeviceState::kDeviceStateIdle)
         {
-            app.Schedule([]()
-                         {
-                            auto &app = Application::GetInstance();
-                            app.ToggleChatState(); });
+            app.GetAudioService().EnableVoiceProcessing(false);
         }
         else
         {
@@ -147,9 +145,6 @@ private:
         power_manager_.PowerOn();
         led_controller_.UpdateLedStatus(power_manager_);
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(70);
-
         ESP_LOGI(TAG, "Device powered on.");
 
         HandleAutoWake();
@@ -159,9 +154,6 @@ private:
     {
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0);
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
 
@@ -175,14 +167,14 @@ private:
     }
 
 public:
-    FogSeekAudioAiya() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekAudioAiya() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO), is_manual_recording_(false)
     {
         InitializePowerManager();
         InitializeLedController();
-        InitializeAudioOutputControl();
         InitializeButtonCallbacks();
-        PowerOn();
         InitializeMCP();
+        PowerOn();
+        StartVadMonitorTask(); // 启动VAD监控任务
 
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
@@ -238,6 +230,11 @@ public:
 
     ~FogSeekAudioAiya()
     {
+        // 确保任务被删除
+        if (vad_monitor_task_handle_ != nullptr)
+        {
+            vTaskDelete(vad_monitor_task_handle_);
+        }
     }
 };
 

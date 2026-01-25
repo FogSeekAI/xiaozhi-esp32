@@ -37,7 +37,7 @@ choice
     config LANGUAGE_ZH_CN
         bool "Chinese"
     config LANGUAGE_ZH_CN_XY
-        bool "Chinese (xiaoya)"
+        bool "Chinese (AiYa)"
     config LANGUAGE_ZH_TW
         bool "Chinese Traditional"
     config LANGUAGE_EN_US
@@ -183,10 +183,10 @@ choice BOARD_TYPE
         bool "Linkbit Vision 4G"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_AUDIO_XIAOYA
-        bool "AiYa"
+        bool "Xiaoya"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_XIAOYA
-        bool "AiYa Pro"
+        bool "Xiaoya Pro"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_SPIN
         bool "Spin Robot"
