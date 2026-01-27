@@ -6,6 +6,8 @@
 #include <esp_timer.h>
 #include <rom/ets_sys.h>
 #include <memory>
+#include <algorithm>
+#include <random>
 
 /// 日志标签
 const char *FogSeekLedController::TAG = "FogSeekLedController";
@@ -129,7 +131,11 @@ FogSeekLedController::FogSeekLedController() : red_led_state_(false),
                                                cold_light_(nullptr),
                                                warm_light_(nullptr),
                                                cold_light_state_(false),
-                                               warm_light_state_(false)
+                                               warm_light_state_(false),
+                                               rgb_led_strip_(nullptr),
+                                               rgb_num_leds_(0),
+                                               current_brightness_level_(2),
+                                               original_color_({255, 255, 255}) // 初始化原始颜色为白色
 {
 }
 
@@ -138,6 +144,8 @@ FogSeekLedController::FogSeekLedController() : red_led_state_(false),
  */
 FogSeekLedController::~FogSeekLedController()
 {
+    // 注意：RGB灯带由外部创建和销毁，这里不需要删除
+
     // 删除红灯控制器
     if (red_led_)
     {
@@ -336,4 +344,259 @@ void FogSeekLedController::SetWarmLightBrightness(int brightness)
             warm_light_->TurnOff();
         }
     }
+}
+
+/**
+ * @brief 设置RGB灯带实例
+ *
+ * @param strip RGB灯带实例指针
+ * @param num_leds 灯珠数量
+ */
+void FogSeekLedController::SetRgbStrip(CircularStrip *strip, uint8_t num_leds)
+{
+    rgb_led_strip_ = strip;
+    rgb_num_leds_ = num_leds;
+    ESP_LOGI(TAG, "RGB strip set with %d LEDs", num_leds);
+}
+
+/**
+ * @brief 开机序列，在指定时间内依次点亮所有灯
+ *
+ * @param total_time_ms 总时间（毫秒）
+ */
+void FogSeekLedController::PowerOnSequence(int total_time_ms)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+        return;
+
+    // 计算每个灯珠之间的延迟时间
+    int delay_per_led = total_time_ms / rgb_num_leds_;
+
+    // 依次点亮每个灯珠
+    for (uint8_t i = 0; i < rgb_num_leds_; i++)
+    {
+        // 使用亮蓝色作为开机颜色
+        uint8_t brightness = brightness_levels_[current_brightness_level_];
+        uint8_t adjusted_red = (0 * brightness) / 100;    // 红色分量为0
+        uint8_t adjusted_green = (0 * brightness) / 100;  // 绿色分量为0
+        uint8_t adjusted_blue = (255 * brightness) / 100; // 蓝色分量为最大值
+        StripColor color = {
+            .red = adjusted_red,
+            .green = adjusted_green,
+            .blue = adjusted_blue};
+
+        rgb_led_strip_->SetSingleColor(i, color);
+
+        // 延迟一段时间
+        vTaskDelay(pdMS_TO_TICKS(delay_per_led));
+    }
+
+    // 设置当前颜色为亮蓝色
+    current_color_ = {
+        .red = 0,
+        .green = 0,
+        .blue = 255};
+    original_color_ = current_color_; // 同时设置原始颜色
+
+    ESP_LOGI(TAG, "Power-on sequence completed");
+}
+
+/**
+ * @brief 打开所有RGB灯光，从暗到亮
+ *
+ * @param duration_ms 持续时间（毫秒）
+ */
+void FogSeekLedController::TurnOnRgbLights(int duration_ms)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+        return;
+
+    // 确保亮度等级有效
+    if (current_brightness_level_ >= 5)
+        current_brightness_level_ = 4;
+
+    // 逐渐增加亮度
+    int steps = 20; // 分成20步完成过渡
+    int step_delay = duration_ms / steps;
+    uint8_t target_brightness = brightness_levels_[current_brightness_level_];
+
+    // 使用原始颜色进行亮度渐变
+    for (int step = 0; step <= steps; step++)
+    {
+        uint8_t brightness = (target_brightness * step) / steps;
+        uint8_t adjusted_red = (original_color_.red * brightness) / 100; // 使用原始颜色
+        uint8_t adjusted_green = (original_color_.green * brightness) / 100;
+        uint8_t adjusted_blue = (original_color_.blue * brightness) / 100;
+        StripColor color = {
+            .red = adjusted_red,
+            .green = adjusted_green,
+            .blue = adjusted_blue};
+
+        rgb_led_strip_->SetAllColor(color);
+        current_color_ = color; // 记录当前颜色
+        vTaskDelay(pdMS_TO_TICKS(step_delay));
+    }
+
+    // 更新当前颜色以反映最终亮度
+    uint8_t target_red = (original_color_.red * target_brightness) / 100;
+    uint8_t target_green = (original_color_.green * target_brightness) / 100;
+    uint8_t target_blue = (original_color_.blue * target_brightness) / 100;
+    current_color_ = {target_red, target_green, target_blue};
+
+    ESP_LOGI(TAG, "RGB values after turning lights on: R=%d, G=%d, B=%d",
+             current_color_.red, current_color_.green, current_color_.blue);
+}
+
+/**
+ * @brief 关闭所有RGB灯光，从亮到暗
+ *
+ * @param duration_ms 持续时间（毫秒）
+ */
+void FogSeekLedController::TurnOffRgbLights(int duration_ms)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+        return;
+
+    // 逐渐减少亮度
+    int steps = 20; // 分成20步完成过渡
+    int step_delay = duration_ms / steps;
+    uint8_t start_brightness = brightness_levels_[current_brightness_level_];
+
+    for (int step = 0; step <= steps; step++)
+    {
+        uint8_t brightness = start_brightness - (start_brightness * step) / steps;
+        uint8_t adjusted_red = (original_color_.red * brightness) / 100; // 使用原始颜色
+        uint8_t adjusted_green = (original_color_.green * brightness) / 100;
+        uint8_t adjusted_blue = (original_color_.blue * brightness) / 100;
+        StripColor color = {
+            .red = adjusted_red,
+            .green = adjusted_green,
+            .blue = adjusted_blue};
+
+        rgb_led_strip_->SetAllColor(color);
+        vTaskDelay(pdMS_TO_TICKS(step_delay));
+    }
+
+    // 最终完全关闭
+    StripColor off_color = {0, 0, 0};
+    rgb_led_strip_->SetAllColor(off_color);
+
+    // 保持当前颜色不变，这样重新开启时可以恢复之前颜色
+
+    ESP_LOGI(TAG, "RGB lights turned off, final RGB values: R=%d, G=%d, B=%d",
+             off_color.red, off_color.green, off_color.blue);
+
+    ESP_LOGI(TAG, "RGB lights turned off");
+}
+
+/**
+ * @brief 增加RGB灯带亮度一个档位
+ */
+void FogSeekLedController::IncreaseBrightness()
+{
+    if (current_brightness_level_ < 4)
+    {
+        current_brightness_level_++;
+        ESP_LOGI(TAG, "Brightness increased to level %d (%d%%)",
+                 current_brightness_level_, brightness_levels_[current_brightness_level_]);
+
+        // 使用原始颜色和新的亮度级别来计算当前颜色
+        uint8_t target_brightness = brightness_levels_[current_brightness_level_];
+        uint8_t adjusted_red = (original_color_.red * target_brightness) / 100;
+        uint8_t adjusted_green = (original_color_.green * target_brightness) / 100;
+        uint8_t adjusted_blue = (original_color_.blue * target_brightness) / 100;
+        StripColor new_color = {
+            .red = adjusted_red,
+            .green = adjusted_green,
+            .blue = adjusted_blue};
+        rgb_led_strip_->SetAllColor(new_color);
+
+        // 更新当前颜色为新颜色
+        current_color_ = new_color;
+
+        ESP_LOGI(TAG, "RGB values after brightness increase: R=%d, G=%d, B=%d",
+                 new_color.red, new_color.green, new_color.blue);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Brightness already at maximum level");
+    }
+}
+
+/**
+ * @brief 降低RGB灯带亮度一个档位
+ */
+void FogSeekLedController::DecreaseBrightness()
+{
+    if (current_brightness_level_ > 0)
+    {
+        current_brightness_level_--;
+        ESP_LOGI(TAG, "Brightness decreased to level %d (%d%%)",
+                 current_brightness_level_, brightness_levels_[current_brightness_level_]);
+
+        // 使用原始颜色和新的亮度级别来计算当前颜色
+        uint8_t target_brightness = brightness_levels_[current_brightness_level_];
+        uint8_t adjusted_red = (original_color_.red * target_brightness) / 100;
+        uint8_t adjusted_green = (original_color_.green * target_brightness) / 100;
+        uint8_t adjusted_blue = (original_color_.blue * target_brightness) / 100;
+        StripColor new_color = {
+            .red = adjusted_red,
+            .green = adjusted_green,
+            .blue = adjusted_blue};
+        rgb_led_strip_->SetAllColor(new_color);
+
+        // 更新当前颜色为新颜色
+        current_color_ = new_color;
+
+        ESP_LOGI(TAG, "RGB values after brightness decrease: R=%d, G=%d, B=%d",
+                 new_color.red, new_color.green, new_color.blue);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Brightness already at minimum level");
+    }
+}
+
+/**
+ * @brief 将RGB灯带颜色变为随机颜色（红橙黄绿青蓝紫）
+ */
+void FogSeekLedController::ChangeToRandomColors()
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+        return;
+
+    // 定义彩虹颜色（红橙黄绿青蓝紫）
+    StripColor rainbow_colors[] = {
+        {255, 0, 0},   // 红色
+        {255, 165, 0}, // 橙色
+        {255, 255, 0}, // 黄色
+        {0, 255, 0},   // 绿色
+        {0, 127, 255}, // 青色
+        {0, 0, 255},   // 蓝色
+        {139, 0, 255}  // 紫色
+    };
+    int num_colors = sizeof(rainbow_colors) / sizeof(rainbow_colors[0]);
+
+    // 使用更简单的随机数生成方式，避免使用可能阻塞的random_device
+    uint32_t rand_val = esp_random(); // 使用ESP-IDF提供的随机数函数
+    int random_index = rand_val % num_colors;
+    StripColor selected_color = rainbow_colors[random_index];
+
+    // 保存原始颜色（未经过亮度调整的纯色）
+    original_color_ = selected_color;
+
+    // 根据当前亮度级别调整颜色强度
+    uint8_t brightness_factor = brightness_levels_[current_brightness_level_];
+    selected_color.red = (selected_color.red * brightness_factor) / 100;
+    selected_color.green = (selected_color.green * brightness_factor) / 100;
+    selected_color.blue = (selected_color.blue * brightness_factor) / 100;
+
+    // 将选中的颜色设置给所有灯珠
+    rgb_led_strip_->SetAllColor(selected_color);
+
+    // 更新当前颜色
+    current_color_ = selected_color;
+
+    ESP_LOGI(TAG, "RGB lights changed to random rainbow colors, new RGB values: R=%d, G=%d, B=%d",
+             current_color_.red, current_color_.green, current_color_.blue);
 }

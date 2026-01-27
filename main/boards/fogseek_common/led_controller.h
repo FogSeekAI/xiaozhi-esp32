@@ -8,6 +8,7 @@
 #include "led/gpio_led.h"
 #include "led/led.h"
 #include "power_manager.h"
+#include "led/circular_strip.h"
 
 #include <memory>
 
@@ -96,11 +97,21 @@ public:
     bool IsColdLightOn() const { return cold_light_state_; }
     bool IsWarmLightOn() const { return warm_light_state_; }
 
+    // RGB灯带控制方法
+    void SetRgbStrip(CircularStrip *strip, uint8_t num_leds); // 设置RGB灯带实例
+    void PowerOnSequence(int total_time_ms = 5000);           // 开机序列，total_time_ms毫秒内依次点亮所有灯
+    void TurnOnRgbLights(int duration_ms = 1000);             // 打开所有灯光，duration_ms时间内从暗到亮
+    void TurnOffRgbLights(int duration_ms = 1000);            // 关闭所有灯光，duration_ms时间内从亮到暗
+    void IncreaseBrightness();                                // 增加亮度一个档位
+    void DecreaseBrightness();                                // 降低亮度一个档位
+    void ChangeToRandomColors();                              // 随机变化颜色（红橙黄绿青蓝紫）
+
     // 获取LED实例的方法
     RedLed *GetRedLed() const { return red_led_; }
     GreenLed *GetGreenLed() const { return green_led_; }
     GpioLed *GetColdLight() const { return cold_light_; }
     GpioLed *GetWarmLight() const { return warm_light_; }
+    CircularStrip *GetRgbStrip() const { return rgb_led_strip_; }
 
 private:
     static const char *TAG; // 日志标签
@@ -116,6 +127,14 @@ private:
     GpioLed *warm_light_ = nullptr; // 暖色灯控制器实例
     bool cold_light_state_ = false; // 冷色灯当前状态
     bool warm_light_state_ = false; // 暖色灯当前状态
+
+    // RGB灯带控制
+    CircularStrip *rgb_led_strip_ = nullptr;              // RGB灯带控制器实例
+    uint8_t rgb_num_leds_ = 0;                            // RGB灯珠数量
+    uint8_t current_brightness_level_ = 2;                // 当前亮度等级 (0-4)，默认为中间值
+    uint8_t brightness_levels_[5] = {0, 25, 50, 75, 100}; // 亮度等级对应的百分比
+    StripColor current_color_ = {255, 255, 255};          // 当前颜色，用于平滑过渡
+    StripColor original_color_ = {255, 255, 255};         // 原始颜色，用于亮度调节
 
     led_pin_config_t pin_config_; // LED引脚配置
 

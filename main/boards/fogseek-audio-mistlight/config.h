@@ -16,9 +16,8 @@
 // LED相关配置
 #define LED_RED_GPIO GPIO_NUM_16
 #define LED_GREEN_GPIO GPIO_NUM_17
-
-#define LED1_GPIO GPIO_NUM_41
 #define LED_RGB_GPIO GPIO_NUM_42
+
 #define MOTOR_GPIO GPIO_NUM_45
 
 // 音频相关配置

@@ -54,6 +54,9 @@ private:
 
         // 初始化RGB灯带
         rgb_led_strip_ = new CircularStrip((gpio_num_t)LED_RGB_GPIO, 16);
+
+        // 将RGB灯带实例设置给控制器
+        led_controller_.SetRgbStrip(rgb_led_strip_, 16);
     }
 
     // 初始化额外的GPIO控制引脚
@@ -95,48 +98,21 @@ private:
                                  motor_state_ = !motor_state_;
 
                                  gpio_set_level(MOTOR_GPIO, motor_state_);
-                                 ESP_LOGI(TAG, "LED1 state changed to: %s", motor_state_ ? "HIGH" : "LOW");
-
-                                 // 循环切换RGB灯带颜色
-                                 static int color_index = 0;
-                                 switch (color_index)
-                                 {
-                                 case 0:
-                                     rgb_led_strip_->SetAllColor({255, 0, 255}); // 紫色
-                                     break;
-                                 case 1:
-                                     rgb_led_strip_->SetAllColor({0, 255, 0}); // 绿色
-                                     break;
-                                 case 2:
-                                     rgb_led_strip_->SetAllColor({255, 255, 0}); // 黄色
-                                     break;
-                                 case 3:
-                                     rgb_led_strip_->SetAllColor({0, 0, 255}); // 蓝色
-                                     break;
-                                 case 4:
-                                     rgb_led_strip_->SetAllColor({255, 165, 0}); // 橙色
-                                     break;
-                                 case 5:
-                                     rgb_led_strip_->SetAllColor({0, 255, 255}); // 青色
-                                     break;
-                                 default:
-                                     rgb_led_strip_->SetAllColor({255, 255, 255}); // 白色
-                                     break;
-                                 }
-                                 color_index = (color_index + 1) % 7; // 循环使用7种颜色
+                                 led_controller_.ChangeToRandomColors();
 
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
-                                    rgb_led_strip_->SetAllColor({0, 0, 0}); // 白色
-            auto &app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting)
-            {
-                EnterWifiConfigMode();
-                return;
-            } });
+                                    led_controller_.TurnOffRgbLights();
+
+                                    auto &app = Application::GetInstance();
+                                    if (app.GetDeviceState() == kDeviceStateStarting)
+                                    {
+                                        EnterWifiConfigMode();
+                                        return;
+                                    } });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -187,6 +163,7 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
+        led_controller_.PowerOnSequence(5000);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
@@ -200,8 +177,8 @@ private:
     void PowerOff()
     {
         power_manager_.PowerOff();
+        led_controller_.TurnOffRgbLights(500); // 平滑关闭灯光
         led_controller_.UpdateLedStatus(power_manager_);
-        rgb_led_strip_->SetAllColor({0, 0, 0}); // 白色
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
@@ -229,7 +206,7 @@ public:
         InitializeAudioOutputControl();
         InitializeGpioControls();
         InitializeButtonCallbacks();
-        InitializeMCP();
+        // InitializeMCP();
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
