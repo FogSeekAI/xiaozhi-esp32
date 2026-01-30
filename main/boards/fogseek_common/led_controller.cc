@@ -5,14 +5,21 @@
 #include <driver/gpio.h>
 #include <esp_timer.h>
 #include <rom/ets_sys.h>
+#include <math.h> // 添加数学库以使用sin函数
 #include <memory>
 #include <algorithm>
-#include <random>
 
 /// 日志标签
 const char *FogSeekLedController::TAG = "FogSeekLedController";
 const char *RedLed::TAG = "RedLed";
 const char *GreenLed::TAG = "GreenLed";
+
+// 静态回调函数，转发到成员函数
+static void EffectTimerCallbackStatic(void *arg)
+{
+    FogSeekLedController *controller = static_cast<FogSeekLedController *>(arg);
+    controller->EffectTimerCallback();
+}
 
 // ==================== RedLed Implementation ====================
 RedLed::RedLed(gpio_num_t gpio, int output_invert, ledc_timer_t timer_num, ledc_channel_t channel) : GpioLed(gpio, output_invert, timer_num, channel) {}
@@ -135,8 +142,30 @@ FogSeekLedController::FogSeekLedController() : red_led_state_(false),
                                                rgb_led_strip_(nullptr),
                                                rgb_num_leds_(0),
                                                current_brightness_level_(2),
-                                               original_color_({255, 255, 255}) // 初始化原始颜色为白色
+                                               brightness_levels_(),
+                                               current_color_({255, 255, 255}),
+                                               original_color_({255, 255, 255}), // 修正初始化顺序，与头文件中声明顺序一致
+                                               effect_timer_(nullptr),
+                                               is_effect_running_(false),
+                                               current_effect_type_(NONE),
+                                               effect_duration_ms_(0),
+                                               effect_delay_per_step_(0),
+                                               effect_current_step_(0),
+                                               effect_total_steps_(0),
+                                               breathing_direction_(1.0f),
+                                               pin_config_()
 {
+    // 创建通用效果定时器
+    esp_timer_create_args_t timer_args = {};
+    timer_args.callback = EffectTimerCallbackStatic;
+    timer_args.arg = this;
+    timer_args.dispatch_method = ESP_TIMER_TASK;
+    timer_args.name = "rgb_effect_timer";
+    esp_err_t err = esp_timer_create(&timer_args, &effect_timer_);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to create effect timer: %s", esp_err_to_name(err));
+    }
 }
 
 /**
@@ -144,7 +173,13 @@ FogSeekLedController::FogSeekLedController() : red_led_state_(false),
  */
 FogSeekLedController::~FogSeekLedController()
 {
-    // 注意：RGB灯带由外部创建和销毁，这里不需要删除
+    // 停止并删除通用效果定时器
+    if (effect_timer_)
+    {
+        esp_timer_stop(effect_timer_);
+        esp_timer_delete(effect_timer_);
+        effect_timer_ = nullptr;
+    }
 
     // 删除红灯控制器
     if (red_led_)
@@ -359,134 +394,282 @@ void FogSeekLedController::SetRgbStrip(CircularStrip *strip, uint8_t num_leds)
     ESP_LOGI(TAG, "RGB strip set with %d LEDs", num_leds);
 }
 
-/**
- * @brief 开机序列，在指定时间内依次点亮所有灯
- *
- * @param total_time_ms 总时间（毫秒）
- */
-void FogSeekLedController::PowerOnSequence(int total_time_ms)
+// 实际的通用效果定时器回调函数
+void FogSeekLedController::EffectTimerCallback()
 {
-    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
-        return;
-
-    // 计算每个灯珠之间的延迟时间
-    int delay_per_led = total_time_ms / rgb_num_leds_;
-
-    // 依次点亮每个灯珠
-    for (uint8_t i = 0; i < rgb_num_leds_; i++)
+    if (!is_effect_running_ || !rgb_led_strip_)
     {
-        // 使用亮蓝色作为开机颜色
-        uint8_t brightness = brightness_levels_[current_brightness_level_];
-        uint8_t adjusted_red = (0 * brightness) / 100;    // 红色分量为0
-        uint8_t adjusted_green = (0 * brightness) / 100;  // 绿色分量为0
-        uint8_t adjusted_blue = (255 * brightness) / 100; // 蓝色分量为最大值
+        return;
+    }
+
+    bool continue_effect = false;
+
+    switch (current_effect_type_)
+    {
+    case POWER_ON_SEQUENCE:
+    {
+        if (effect_current_step_ < rgb_num_leds_)
+        {
+            // 使用亮蓝色作为开机颜色
+            uint8_t brightness = brightness_levels_[current_brightness_level_];
+            uint8_t adjusted_red = (0 * brightness) / 100;    // 红色分量为0
+            uint8_t adjusted_green = (0 * brightness) / 100;  // 绿色分量为0
+            uint8_t adjusted_blue = (255 * brightness) / 100; // 蓝色分量为最大值
+            StripColor color = {
+                .red = adjusted_red,
+                .green = adjusted_green,
+                .blue = adjusted_blue};
+
+            rgb_led_strip_->SetSingleColor(effect_current_step_, color);
+
+            effect_current_step_++;
+            continue_effect = true;
+        }
+        else
+        {
+            // 设置当前颜色为亮蓝色
+            current_color_ = {
+                .red = 0,
+                .green = 0,
+                .blue = 255};
+            original_color_ = current_color_; // 同时设置原始颜色
+
+            ESP_LOGI(TAG, "Power-on sequence completed");
+            is_effect_running_ = false;
+        }
+        break;
+    }
+    case TURN_ON_LIGHTS:
+    {
+        if (effect_current_step_ <= effect_total_steps_)
+        {
+            uint8_t brightness = (brightness_levels_[current_brightness_level_] * effect_current_step_) / effect_total_steps_;
+            uint8_t adjusted_red = (original_color_.red * brightness) / 100;
+            uint8_t adjusted_green = (original_color_.green * brightness) / 100;
+            uint8_t adjusted_blue = (original_color_.blue * brightness) / 100;
+            StripColor color = {
+                .red = adjusted_red,
+                .green = adjusted_green,
+                .blue = adjusted_blue};
+
+            rgb_led_strip_->SetAllColor(color);
+            current_color_ = color;
+
+            effect_current_step_++;
+            continue_effect = true;
+        }
+        else
+        {
+            // 更新当前颜色以反映最终亮度
+            uint8_t target_brightness = brightness_levels_[current_brightness_level_];
+            uint8_t target_red = (original_color_.red * target_brightness) / 100;
+            uint8_t target_green = (original_color_.green * target_brightness) / 100;
+            uint8_t target_blue = (original_color_.blue * target_brightness) / 100;
+            current_color_ = {target_red, target_green, target_blue};
+
+            ESP_LOGI(TAG, "RGB values after turning lights on: R=%d, G=%d, B=%d",
+                     current_color_.red, current_color_.green, current_color_.blue);
+
+            is_effect_running_ = false;
+        }
+        break;
+    }
+    case TURN_OFF_LIGHTS:
+    {
+        if (effect_current_step_ <= effect_total_steps_)
+        {
+            uint8_t start_brightness = brightness_levels_[current_brightness_level_];
+            uint8_t brightness = start_brightness - (start_brightness * effect_current_step_) / effect_total_steps_;
+            uint8_t adjusted_red = (original_color_.red * brightness) / 100;
+            uint8_t adjusted_green = (original_color_.green * brightness) / 100;
+            uint8_t adjusted_blue = (original_color_.blue * brightness) / 100;
+            StripColor color = {
+                .red = adjusted_red,
+                .green = adjusted_green,
+                .blue = adjusted_blue};
+
+            rgb_led_strip_->SetAllColor(color);
+
+            effect_current_step_++;
+            continue_effect = true;
+        }
+        else
+        {
+            // 最终完全关闭
+            StripColor off_color = {0, 0, 0};
+            rgb_led_strip_->SetAllColor(off_color);
+
+            ESP_LOGI(TAG, "RGB lights turned off, final RGB values: R=%d, G=%d, B=%d",
+                     off_color.red, off_color.green, off_color.blue);
+
+            ESP_LOGI(TAG, "RGB lights turned off");
+
+            is_effect_running_ = false;
+        }
+        break;
+    }
+    case BREATHING_EFFECT:
+    {
+        // 使用正弦波函数创建平滑的呼吸效果
+        float angle = (2.0f * M_PI * effect_current_step_) / effect_total_steps_;
+        float brightness_ratio = (sin(angle) + 1.0f) / 2.0f; // 映射到0.0-1.0范围
+
+        // 根据原始颜色和当前亮度系数计算实际颜色
+        uint8_t adjusted_red = static_cast<uint8_t>(original_color_.red * brightness_ratio);
+        uint8_t adjusted_green = static_cast<uint8_t>(original_color_.green * brightness_ratio);
+        uint8_t adjusted_blue = static_cast<uint8_t>(original_color_.blue * brightness_ratio);
+
         StripColor color = {
             .red = adjusted_red,
             .green = adjusted_green,
             .blue = adjusted_blue};
 
-        rgb_led_strip_->SetSingleColor(i, color);
+        // 设置所有LED的颜色
+        rgb_led_strip_->SetAllColor(color);
 
-        // 延迟一段时间
-        vTaskDelay(pdMS_TO_TICKS(delay_per_led));
+        // 更新步骤，循环
+        effect_current_step_ = (effect_current_step_ + 1) % effect_total_steps_;
+        continue_effect = true; // 呼吸效果是持续的，除非被停止
+        break;
+    }
+    default:
+        is_effect_running_ = false;
+        break;
     }
 
-    // 设置当前颜色为亮蓝色
-    current_color_ = {
-        .red = 0,
-        .green = 0,
-        .blue = 255};
-    original_color_ = current_color_; // 同时设置原始颜色
-
-    ESP_LOGI(TAG, "Power-on sequence completed");
+    // 如果需要继续效果，重新启动定时器
+    if (continue_effect && is_effect_running_)
+    {
+        esp_timer_start_once(effect_timer_, effect_delay_per_step_ * 1000);
+    }
 }
 
-/**
- * @brief 打开所有RGB灯光，从暗到亮
- *
- * @param duration_ms 持续时间（毫秒）
- */
-void FogSeekLedController::TurnOnRgbLights(int duration_ms)
+// 启动通用效果
+bool FogSeekLedController::StartEffect(EffectType type, int duration_ms)
 {
-    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
-        return;
-
-    // 确保亮度等级有效
-    if (current_brightness_level_ >= 5)
-        current_brightness_level_ = 4;
-
-    // 逐渐增加亮度
-    int steps = 20; // 分成20步完成过渡
-    int step_delay = duration_ms / steps;
-    uint8_t target_brightness = brightness_levels_[current_brightness_level_];
-
-    // 使用原始颜色进行亮度渐变
-    for (int step = 0; step <= steps; step++)
+    if (!rgb_led_strip_ || is_effect_running_)
     {
-        uint8_t brightness = (target_brightness * step) / steps;
-        uint8_t adjusted_red = (original_color_.red * brightness) / 100; // 使用原始颜色
-        uint8_t adjusted_green = (original_color_.green * brightness) / 100;
-        uint8_t adjusted_blue = (original_color_.blue * brightness) / 100;
-        StripColor color = {
-            .red = adjusted_red,
-            .green = adjusted_green,
-            .blue = adjusted_blue};
-
-        rgb_led_strip_->SetAllColor(color);
-        current_color_ = color; // 记录当前颜色
-        vTaskDelay(pdMS_TO_TICKS(step_delay));
+        return false;
     }
 
-    // 更新当前颜色以反映最终亮度
-    uint8_t target_red = (original_color_.red * target_brightness) / 100;
-    uint8_t target_green = (original_color_.green * target_brightness) / 100;
-    uint8_t target_blue = (original_color_.blue * target_brightness) / 100;
-    current_color_ = {target_red, target_green, target_blue};
+    // 设置效果参数
+    current_effect_type_ = type;
+    effect_duration_ms_ = duration_ms;
 
-    ESP_LOGI(TAG, "RGB values after turning lights on: R=%d, G=%d, B=%d",
-             current_color_.red, current_color_.green, current_color_.blue);
+    switch (type)
+    {
+    case POWER_ON_SEQUENCE:
+        effect_total_steps_ = rgb_num_leds_;
+        effect_current_step_ = 0;
+        effect_delay_per_step_ = duration_ms / rgb_num_leds_;
+        break;
+    case TURN_ON_LIGHTS:
+    case TURN_OFF_LIGHTS:
+        effect_total_steps_ = 20; // 分成20步完成过渡
+        effect_current_step_ = 0;
+        effect_delay_per_step_ = duration_ms / effect_total_steps_;
+        break;
+    case BREATHING_EFFECT:
+        effect_total_steps_ = 80; // 一个周期的步数
+        effect_current_step_ = 0;
+        effect_delay_per_step_ = duration_ms / effect_total_steps_;
+        break;
+    case NONE:
+        return false;
+    }
+
+    is_effect_running_ = true;
+
+    // 启动定时器
+    esp_err_t err = esp_timer_start_once(effect_timer_, effect_delay_per_step_ * 1000);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to start effect timer: %s", esp_err_to_name(err));
+        is_effect_running_ = false;
+        return false;
+    }
+
+    return true;
 }
 
-/**
- * @brief 关闭所有RGB灯光，从亮到暗
- *
- * @param duration_ms 持续时间（毫秒）
- */
-void FogSeekLedController::TurnOffRgbLights(int duration_ms)
+// 停止当前效果
+void FogSeekLedController::StopCurrentEffect()
+{
+    if (effect_timer_)
+    {
+        esp_timer_stop(effect_timer_);
+    }
+    is_effect_running_ = false;
+    current_effect_type_ = NONE;
+}
+
+// 非阻塞版本的开机序列
+bool FogSeekLedController::PowerOnSequence(int total_time_ms)
 {
     if (!rgb_led_strip_ || rgb_num_leds_ == 0)
-        return;
-
-    // 逐渐减少亮度
-    int steps = 20; // 分成20步完成过渡
-    int step_delay = duration_ms / steps;
-    uint8_t start_brightness = brightness_levels_[current_brightness_level_];
-
-    for (int step = 0; step <= steps; step++)
     {
-        uint8_t brightness = start_brightness - (start_brightness * step) / steps;
-        uint8_t adjusted_red = (original_color_.red * brightness) / 100; // 使用原始颜色
-        uint8_t adjusted_green = (original_color_.green * brightness) / 100;
-        uint8_t adjusted_blue = (original_color_.blue * brightness) / 100;
+        return false;
+    }
+
+    return StartEffect(POWER_ON_SEQUENCE, total_time_ms);
+}
+
+// 非阻塞版本的打开灯光
+bool FogSeekLedController::TurnOnRgbLights(int duration_ms)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+    {
+        return false;
+    }
+
+    return StartEffect(TURN_ON_LIGHTS, duration_ms);
+}
+
+// 非阻塞版本的关闭灯光
+bool FogSeekLedController::TurnOffRgbLights(int duration_ms)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+    {
+        return false;
+    }
+
+    return StartEffect(TURN_OFF_LIGHTS, duration_ms);
+}
+
+// 开始呼吸效果
+bool FogSeekLedController::StartBreathingEffect(int cycle_duration_ms)
+{
+    if (!rgb_led_strip_)
+    {
+        ESP_LOGE(TAG, "RGB strip not initialized");
+        return false;
+    }
+
+    // 如果已有其他效果在运行，先停止
+    StopCurrentEffect();
+
+    return StartEffect(BREATHING_EFFECT, cycle_duration_ms);
+}
+
+// 停止呼吸效果
+void FogSeekLedController::StopBreathingEffect()
+{
+    if (current_effect_type_ == BREATHING_EFFECT)
+    {
+        StopCurrentEffect();
+
+        // 恢复到当前设置的颜色和亮度
+        uint8_t target_brightness = brightness_levels_[current_brightness_level_];
+        uint8_t adjusted_red = (original_color_.red * target_brightness) / 100;
+        uint8_t adjusted_green = (original_color_.green * target_brightness) / 100;
+        uint8_t adjusted_blue = (original_color_.blue * target_brightness) / 100;
         StripColor color = {
             .red = adjusted_red,
             .green = adjusted_green,
             .blue = adjusted_blue};
-
         rgb_led_strip_->SetAllColor(color);
-        vTaskDelay(pdMS_TO_TICKS(step_delay));
+        current_color_ = color;
     }
-
-    // 最终完全关闭
-    StripColor off_color = {0, 0, 0};
-    rgb_led_strip_->SetAllColor(off_color);
-
-    // 保持当前颜色不变，这样重新开启时可以恢复之前颜色
-
-    ESP_LOGI(TAG, "RGB lights turned off, final RGB values: R=%d, G=%d, B=%d",
-             off_color.red, off_color.green, off_color.blue);
-
-    ESP_LOGI(TAG, "RGB lights turned off");
 }
 
 /**

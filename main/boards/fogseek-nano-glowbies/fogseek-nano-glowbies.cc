@@ -274,7 +274,7 @@ private:
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
 
-        SetAudioAmplifierState(true);
+        // SetAudioAmplifierState(true);
         SetExtensionPowerEnableState(true); // 开机时打开扩展板电源使能
 
         ESP_LOGI(TAG, "Device powered on.");
@@ -291,7 +291,7 @@ private:
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
-        SetAudioAmplifierState(false);
+        // SetAudioAmplifierState(false);
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
 
@@ -318,7 +318,7 @@ public:
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
-        InitializeAudioAmplifier();
+        // InitializeAudioAmplifier();
         InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
         InitializeMCP();
@@ -345,7 +345,7 @@ public:
             AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
-            GPIO_NUM_NC,
+            AUDIO_CODEC_PA_PIN,
             AUDIO_CODEC_ES8389_ADDR,
             true,
             true);

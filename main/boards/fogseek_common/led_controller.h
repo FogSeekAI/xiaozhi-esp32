@@ -69,6 +69,19 @@ private:
     bool ignore_state_changes_ = false; // 是否忽略设备状态变化
 };
 
+// 用于区分不同效果的枚举 - 需要在类外部声明以供内部使用
+enum EffectType
+{
+    NONE,
+    POWER_ON_SEQUENCE,
+    TURN_ON_LIGHTS,
+    TURN_OFF_LIGHTS,
+    BREATHING_EFFECT
+};
+
+// 静态定时器回调函数（C 风格），用于 esp_timer 回调
+static void EffectTimerCallbackStatic(void *arg);
+
 /**
  * @class FogSeekLedController
  * @brief 雾岸设备LED控制器类
@@ -99,12 +112,14 @@ public:
 
     // RGB灯带控制方法
     void SetRgbStrip(CircularStrip *strip, uint8_t num_leds); // 设置RGB灯带实例
-    void PowerOnSequence(int total_time_ms = 5000);           // 开机序列，total_time_ms毫秒内依次点亮所有灯
-    void TurnOnRgbLights(int duration_ms = 1000);             // 打开所有灯光，duration_ms时间内从暗到亮
-    void TurnOffRgbLights(int duration_ms = 1000);            // 关闭所有灯光，duration_ms时间内从亮到暗
+    bool PowerOnSequence(int total_time_ms = 5000);           // 开机序列，total_time_ms毫秒内依次点亮所有灯
+    bool TurnOnRgbLights(int duration_ms = 1000);             // 打开所有灯光，duration_ms时间内从暗到亮
+    bool TurnOffRgbLights(int duration_ms = 1000);            // 关闭所有灯光，duration_ms时间内从亮到暗
     void IncreaseBrightness();                                // 增加亮度一个档位
     void DecreaseBrightness();                                // 降低亮度一个档位
     void ChangeToRandomColors();                              // 随机变化颜色（红橙黄绿青蓝紫）
+    bool StartBreathingEffect(int cycle_duration_ms = 4000);  // 开始呼吸效果，cycle_duration_ms为一个完整周期的时间
+    void StopBreathingEffect();                               // 停止呼吸效果
 
     // 获取LED实例的方法
     RedLed *GetRedLed() const { return red_led_; }
@@ -112,6 +127,13 @@ public:
     GpioLed *GetColdLight() const { return cold_light_; }
     GpioLed *GetWarmLight() const { return warm_light_; }
     CircularStrip *GetRgbStrip() const { return rgb_led_strip_; }
+
+    // 定时器状态查询
+    bool IsEffectRunning() const { return is_effect_running_; }
+    bool IsBreathingEffectActive() const { return current_effect_type_ == BREATHING_EFFECT; }
+
+    // 内部辅助函数（需要被静态回调函数访问）
+    void EffectTimerCallback(); // 效果定时器回调函数
 
 private:
     static const char *TAG; // 日志标签
@@ -136,11 +158,25 @@ private:
     StripColor current_color_ = {255, 255, 255};          // 当前颜色，用于平滑过渡
     StripColor original_color_ = {255, 255, 255};         // 原始颜色，用于亮度调节
 
+    // 通用异步效果相关
+    esp_timer_handle_t effect_timer_ = nullptr;
+    bool is_effect_running_ = false;
+
+    // 通用效果参数
+    EffectType current_effect_type_ = NONE; // 当前效果类型
+    int effect_duration_ms_ = 0;            // 效果持续时间
+    int effect_delay_per_step_ = 0;         // 每步延迟时间
+    int effect_current_step_ = 0;           // 当前步骤
+    int effect_total_steps_ = 0;            // 总步骤数
+
+    // 呼吸效果专用参数
+    float breathing_direction_ = 1.0f; // 呼吸方向：1为增强，-1为减弱
+
     led_pin_config_t pin_config_; // LED引脚配置
 
-    // 禁止拷贝构造和赋值操作
-    FogSeekLedController(const FogSeekLedController &) = delete;
-    FogSeekLedController &operator=(const FogSeekLedController &) = delete;
+    // 内部辅助函数
+    bool StartEffect(EffectType type, int duration_ms); // 启动通用效果
+    void StopCurrentEffect();                           // 停止当前效果
 };
 
 #endif
