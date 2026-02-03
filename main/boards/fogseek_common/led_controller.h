@@ -12,9 +12,6 @@
 
 #include <memory>
 
-// 前向声明FogSeekLedController类，以便在GreenLed中使用
-class FogSeekLedController;
-
 // LED引脚配置结构体
 typedef struct
 {
@@ -26,7 +23,6 @@ typedef struct
 } led_pin_config_t;
 
 /**
- * @class RedLed
  * @brief 红色LED类，负责电源状态显示
  */
 class RedLed : public GpioLed
@@ -47,7 +43,6 @@ private:
 };
 
 /**
- * @class GreenLed
  * @brief 绿色LED类，负责设备状态显示
  */
 class GreenLed : public GpioLed
@@ -73,17 +68,13 @@ private:
 enum EffectType
 {
     NONE,
-    POWER_ON_SEQUENCE,
+    MARQUEE_EFFECT,
     TURN_ON_LIGHTS,
     TURN_OFF_LIGHTS,
     BREATHING_EFFECT
 };
 
-// 静态定时器回调函数（C 风格），用于 esp_timer 回调
-static void EffectTimerCallbackStatic(void *arg);
-
 /**
- * @class FogSeekLedController
  * @brief 雾岸设备LED控制器类
  *
  * 该类是LED系统的主控制器，负责管理红绿灯和其他LED设备。
@@ -112,7 +103,7 @@ public:
 
     // RGB灯带控制方法
     void SetRgbStrip(CircularStrip *strip, uint8_t num_leds); // 设置RGB灯带实例
-    bool PowerOnSequence(int total_time_ms = 5000);           // 开机序列，total_time_ms毫秒内依次点亮所有灯
+    bool RunMarqueeLights(int total_time_ms = 5000);          // 跑马灯效果，total_time_ms毫秒内依次点亮所有灯，原PowerOnSequence函数改名
     bool TurnOnRgbLights(int duration_ms = 1000);             // 打开所有灯光，duration_ms时间内从暗到亮
     bool TurnOffRgbLights(int duration_ms = 1000);            // 关闭所有灯光，duration_ms时间内从亮到暗
     void IncreaseBrightness();                                // 增加亮度一个档位
@@ -138,9 +129,7 @@ public:
 private:
     static const char *TAG; // 日志标签
 
-    bool red_led_state_ = false;   // 红色LED当前状态
-    bool green_led_state_ = false; // 绿色LED当前状态
-
+    // LED实例
     RedLed *red_led_ = nullptr;     // 红色LED控制器实例
     GreenLed *green_led_ = nullptr; // 绿色LED控制器实例
 
@@ -151,12 +140,12 @@ private:
     bool warm_light_state_ = false; // 暖色灯当前状态
 
     // RGB灯带控制
-    CircularStrip *rgb_led_strip_ = nullptr;              // RGB灯带控制器实例
-    uint8_t rgb_num_leds_ = 0;                            // RGB灯珠数量
-    uint8_t current_brightness_level_ = 2;                // 当前亮度等级 (0-4)，默认为中间值
-    uint8_t brightness_levels_[5] = {0, 25, 50, 75, 100}; // 亮度等级对应的百分比
-    StripColor current_color_ = {255, 255, 255};          // 当前颜色，用于平滑过渡
-    StripColor original_color_ = {255, 255, 255};         // 原始颜色，用于亮度调节
+    CircularStrip *rgb_led_strip_ = nullptr;               // RGB灯带控制器实例
+    uint8_t rgb_num_leds_ = 0;                             // RGB灯珠数量
+    uint8_t current_brightness_level_ = 2;                 // 当前亮度等级 (0-4)，默认为中间值
+    uint8_t brightness_levels_[5] = {10, 30, 50, 70, 100}; // 亮度等级对应的百分比
+    StripColor current_color_ = {255, 255, 255};           // 当前颜色，用于平滑过渡
+    StripColor original_color_ = {255, 255, 255};          // 原始颜色，用于亮度调节
 
     // 通用异步效果相关
     esp_timer_handle_t effect_timer_ = nullptr;

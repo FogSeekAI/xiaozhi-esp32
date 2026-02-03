@@ -2,6 +2,8 @@
 #include "config.h"
 #include "power_manager.h"
 #include "led_controller.h"
+#include "motor_controller.h"
+#include "fragrance_controller.h" // 添加香氛控制器头文件
 #include "codecs/no_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
@@ -17,6 +19,7 @@
 #include "device_state_machine.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
+#include <random>
 
 #define TAG "FogSeekAudioMistLight"
 
@@ -27,6 +30,8 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
+    FogSeekMotorController motor_controller_;                                      // 添加电机控制器
+    FragranceController fragrance_controller_{led_controller_, motor_controller_}; // 香氛控制器
     CircularStrip *rgb_led_strip_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
@@ -62,15 +67,8 @@ private:
     // 初始化额外的GPIO控制引脚
     void InitializeGpioControls()
     {
-        gpio_config_t io_conf_led1 = {};
-        io_conf_led1.intr_type = GPIO_INTR_DISABLE;
-        io_conf_led1.mode = GPIO_MODE_OUTPUT;
-        io_conf_led1.pin_bit_mask = (1ULL << MOTOR_GPIO);
-        io_conf_led1.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf_led1.pull_up_en = GPIO_PULLUP_DISABLE;
-        gpio_config(&io_conf_led1);
-
-        gpio_set_level(MOTOR_GPIO, 0);
+        // 初始化电机控制器
+        motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
 
         ESP_LOGI(TAG, "GPIO controls initialized: MOTOR=%d", MOTOR_GPIO);
     }
@@ -79,8 +77,15 @@ private:
     void ToggleMotor()
     {
         motor_state_ = !motor_state_;
-        gpio_set_level(MOTOR_GPIO, motor_state_);
+        motor_controller_.ControlMotor(motor_state_);
         ESP_LOGI(TAG, "MOTOR state changed to: %s", motor_state_ ? "HIGH" : "LOW");
+    }
+
+    // 运行电机定时功能，例如每分钟运行10秒
+    void RunMotorTimed(uint32_t run_time_ms)
+    {
+        motor_controller_.RunMotorTimed(run_time_ms);
+        ESP_LOGI(TAG, "MOTOR scheduled: run for %d ms", run_time_ms);
     }
 
     // 初始化音频输出控制
@@ -94,38 +99,9 @@ private:
     void InitializeButtonCallbacks()
     {
         ctrl_button_.OnClick([this]()
-                             { led_controller_.PowerOnSequence(5000); });
+                             { fragrance_controller_.SetMode(FragranceController::Mode::WORK_MODE); });
         ctrl_button_.OnDoubleClick([this]()
-                                   {
-                                       led_controller_.TurnOffRgbLights();
-                                       // 循环切换RGB灯带颜色
-                                       static int color_index = 0;
-                                       switch (color_index)
-                                       {
-                                       case 0:
-                                           rgb_led_strip_->SetAllColor({255, 0, 255}); // 紫色
-                                           break;
-                                       case 1:
-                                           rgb_led_strip_->SetAllColor({0, 255, 0}); // 绿色
-                                           break;
-                                       case 2:
-                                           rgb_led_strip_->SetAllColor({255, 255, 0}); // 黄色
-                                           break;
-                                       case 3:
-                                           rgb_led_strip_->SetAllColor({0, 0, 255}); // 蓝色
-                                           break;
-                                       case 4:
-                                           rgb_led_strip_->SetAllColor({255, 165, 0}); // 橙色
-                                           break;
-                                       case 5:
-                                           rgb_led_strip_->SetAllColor({0, 255, 255}); // 青色
-                                           break;
-                                       default:
-                                           rgb_led_strip_->SetAllColor({255, 255, 255}); // 白色
-                                           break;
-                                       }
-                                       color_index = (color_index + 1) % 7; // 循环使用7种颜色
-                                   });
+                                   { fragrance_controller_.SetMode(FragranceController::Mode::SLEEP_AID_MODE); });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -176,7 +152,7 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
-        led_controller_.PowerOnSequence(5000);
+        led_controller_.RunMarqueeLights(5000);          // 使用新的跑马灯函数名
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
@@ -207,8 +183,14 @@ private:
         // 获取MCP服务器实例
         auto &mcp_server = McpServer::GetInstance();
 
-        // 初始化RGB LED MCP 工具
-        InitializeRgbLedMCP(mcp_server, rgb_led_strip_);
+        // 初始化RGB LED特效 MCP 工具
+        InitializeRgbLedMCP(mcp_server, led_controller_);
+
+        // 初始化电机 MCP 工具
+        InitializeMotorMCP(mcp_server, motor_controller_);
+
+        // 初始化香氛控制相关的MCP工具
+        InitializeFragranceMCP(mcp_server, fragrance_controller_);
     }
 
 public:
@@ -219,7 +201,7 @@ public:
         InitializeAudioOutputControl();
         InitializeGpioControls();
         InitializeButtonCallbacks();
-        // InitializeMCP();
+        InitializeMCP();
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)

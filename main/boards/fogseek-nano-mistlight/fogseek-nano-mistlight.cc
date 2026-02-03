@@ -2,7 +2,7 @@
 #include "config.h"
 #include "power_manager.h"
 #include "led_controller.h"
-#include "servo_controller.h"
+#include "motor_controller.h"
 #include "codecs/es8389_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
@@ -29,7 +29,7 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-    FogSeekServoController servo_controller_;
+    FogSeekMotorController servo_controller_;  // 保持原变量名，但使用新类
     CircularStrip *rgb_led_strip_ = nullptr;
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
@@ -80,7 +80,7 @@ private:
     void InitializeServoController()
     {
         // 使用配置文件中定义的舵机控制引脚 (GPIO_NUM_5)
-        servo_controller_.Initialize(SERVO_BODY_GPIO);
+        servo_controller_.InitializeServo(SERVO_BODY_GPIO);
 
         // 设置舵机初始位置
         servo_controller_.SetAngle(90); // 90度位置（中间）

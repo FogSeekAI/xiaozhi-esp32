@@ -5,7 +5,7 @@
 #include <driver/gpio.h>
 #include <esp_timer.h>
 #include <rom/ets_sys.h>
-#include <math.h> // 添加数学库以使用sin函数
+#include <math.h>
 #include <memory>
 #include <algorithm>
 
@@ -46,12 +46,8 @@ void RedLed::UpdateBatteryStatus(FogSeekPowerManager::PowerState state)
         break;
 
     case FogSeekPowerManager::PowerState::USB_POWER_NO_BATTERY:
-        // USB供电无电池：红灯熄灭
-        TurnOff();
-        break;
-
     case FogSeekPowerManager::PowerState::BATTERY_POWER:
-        // 电池供电：红灯熄灭
+    case FogSeekPowerManager::PowerState::NO_POWER:
         TurnOff();
         break;
 
@@ -59,11 +55,6 @@ void RedLed::UpdateBatteryStatus(FogSeekPowerManager::PowerState state)
         // 低电量状态：红灯100ms间隔连续闪烁
         SetBrightness(100);
         StartContinuousBlink(100);
-        break;
-
-    case FogSeekPowerManager::PowerState::NO_POWER:
-        // 无电源：红灯熄灭
-        TurnOff();
         break;
 
     default:
@@ -85,8 +76,10 @@ void GreenLed::OnStateChanged()
         TurnOff();
         return;
     }
+
     auto &app = Application::GetInstance();
     auto device_state = app.GetDeviceState();
+
     switch (device_state)
     {
     case kDeviceStateIdle: // 空闲状态：绿灯呼吸效果
@@ -119,7 +112,7 @@ void GreenLed::OnStateChanged()
         break;
 
     default:
-        ESP_LOGE(TAG, "Unknown gpio led event: %d", static_cast<int>(device_state));
+        ESP_LOGE(TAG, "Unknown device state: %d", static_cast<int>(device_state));
         return;
     }
 
@@ -131,28 +124,7 @@ void GreenLed::OnStateChanged()
 /**
  * @brief 构造函数 - 初始化LED控制器
  */
-FogSeekLedController::FogSeekLedController() : red_led_state_(false),
-                                               green_led_state_(false),
-                                               red_led_(nullptr),
-                                               green_led_(nullptr),
-                                               cold_light_(nullptr),
-                                               warm_light_(nullptr),
-                                               cold_light_state_(false),
-                                               warm_light_state_(false),
-                                               rgb_led_strip_(nullptr),
-                                               rgb_num_leds_(0),
-                                               current_brightness_level_(2),
-                                               brightness_levels_(),
-                                               current_color_({255, 255, 255}),
-                                               original_color_({255, 255, 255}), // 修正初始化顺序，与头文件中声明顺序一致
-                                               effect_timer_(nullptr),
-                                               is_effect_running_(false),
-                                               current_effect_type_(NONE),
-                                               effect_duration_ms_(0),
-                                               effect_delay_per_step_(0),
-                                               effect_current_step_(0),
-                                               effect_total_steps_(0),
-                                               breathing_direction_(1.0f),
+FogSeekLedController::FogSeekLedController() : effect_timer_(nullptr),
                                                pin_config_()
 {
     // 创建通用效果定时器
@@ -391,6 +363,14 @@ void FogSeekLedController::SetRgbStrip(CircularStrip *strip, uint8_t num_leds)
 {
     rgb_led_strip_ = strip;
     rgb_num_leds_ = num_leds;
+
+    // 初始化默认颜色，防止original_color_为全黑
+    if (original_color_.red == 0 && original_color_.green == 0 && original_color_.blue == 0)
+    {
+        original_color_ = {100, 100, 100}; // 设置默认为淡白色
+        current_color_ = {0, 0, 0};        // 初始状态为关闭
+    }
+
     ESP_LOGI(TAG, "RGB strip set with %d LEDs", num_leds);
 }
 
@@ -406,19 +386,24 @@ void FogSeekLedController::EffectTimerCallback()
 
     switch (current_effect_type_)
     {
-    case POWER_ON_SEQUENCE:
+    case MARQUEE_EFFECT:
     {
         if (effect_current_step_ < rgb_num_leds_)
         {
-            // 使用亮蓝色作为开机颜色
-            uint8_t brightness = brightness_levels_[current_brightness_level_];
-            uint8_t adjusted_red = (0 * brightness) / 100;    // 红色分量为0
-            uint8_t adjusted_green = (0 * brightness) / 100;  // 绿色分量为0
-            uint8_t adjusted_blue = (255 * brightness) / 100; // 蓝色分量为最大值
+            // 使用当前亮度等级来控制跑马灯颜色
+            uint8_t brightness_factor = brightness_levels_[current_brightness_level_];
             StripColor color = {
-                .red = adjusted_red,
-                .green = adjusted_green,
-                .blue = adjusted_blue};
+                .red = static_cast<uint8_t>((original_color_.red * brightness_factor) / 100),
+                .green = static_cast<uint8_t>((original_color_.green * brightness_factor) / 100),
+                .blue = static_cast<uint8_t>((original_color_.blue * brightness_factor) / 100)};
+
+            // 先清除所有LED，然后只点亮当前的LED
+            if (effect_current_step_ == 0)
+            {
+                // 第一次时清除所有LED
+                StripColor off_color = {0, 0, 0};
+                rgb_led_strip_->SetAllColor(off_color);
+            }
 
             rgb_led_strip_->SetSingleColor(effect_current_step_, color);
 
@@ -427,31 +412,32 @@ void FogSeekLedController::EffectTimerCallback()
         }
         else
         {
-            // 设置当前颜色为亮蓝色
+            // 效果完成，将当前颜色设置为与亮度匹配的颜色
+            uint8_t brightness_factor = brightness_levels_[current_brightness_level_];
             current_color_ = {
-                .red = 0,
-                .green = 0,
-                .blue = 255};
-            original_color_ = current_color_; // 同时设置原始颜色
+                .red = static_cast<uint8_t>((original_color_.red * brightness_factor) / 100),
+                .green = static_cast<uint8_t>((original_color_.green * brightness_factor) / 100),
+                .blue = static_cast<uint8_t>((original_color_.blue * brightness_factor) / 100)};
+            original_color_ = current_color_;
 
-            ESP_LOGI(TAG, "Power-on sequence completed");
+            ESP_LOGI(TAG, "Marquee lights effect completed");
             is_effect_running_ = false;
         }
         break;
     }
+
     case TURN_ON_LIGHTS:
     {
         if (effect_current_step_ <= effect_total_steps_)
         {
             uint8_t brightness = (brightness_levels_[current_brightness_level_] * effect_current_step_) / effect_total_steps_;
-            uint8_t adjusted_red = (original_color_.red * brightness) / 100;
-            uint8_t adjusted_green = (original_color_.green * brightness) / 100;
-            uint8_t adjusted_blue = (original_color_.blue * brightness) / 100;
+            uint8_t adjusted_red = static_cast<uint8_t>((original_color_.red * brightness) / 100);
+            uint8_t adjusted_green = static_cast<uint8_t>((original_color_.green * brightness) / 100);
+            uint8_t adjusted_blue = static_cast<uint8_t>((original_color_.blue * brightness) / 100);
             StripColor color = {
                 .red = adjusted_red,
                 .green = adjusted_green,
                 .blue = adjusted_blue};
-
             rgb_led_strip_->SetAllColor(color);
             current_color_ = color;
 
@@ -462,18 +448,16 @@ void FogSeekLedController::EffectTimerCallback()
         {
             // 更新当前颜色以反映最终亮度
             uint8_t target_brightness = brightness_levels_[current_brightness_level_];
-            uint8_t target_red = (original_color_.red * target_brightness) / 100;
-            uint8_t target_green = (original_color_.green * target_brightness) / 100;
-            uint8_t target_blue = (original_color_.blue * target_brightness) / 100;
+            uint8_t target_red = static_cast<uint8_t>((original_color_.red * target_brightness) / 100);
+            uint8_t target_green = static_cast<uint8_t>((original_color_.green * target_brightness) / 100);
+            uint8_t target_blue = static_cast<uint8_t>((original_color_.blue * target_brightness) / 100);
             current_color_ = {target_red, target_green, target_blue};
-
-            ESP_LOGI(TAG, "RGB values after turning lights on: R=%d, G=%d, B=%d",
-                     current_color_.red, current_color_.green, current_color_.blue);
 
             is_effect_running_ = false;
         }
         break;
     }
+
     case TURN_OFF_LIGHTS:
     {
         if (effect_current_step_ <= effect_total_steps_)
@@ -499,15 +483,13 @@ void FogSeekLedController::EffectTimerCallback()
             StripColor off_color = {0, 0, 0};
             rgb_led_strip_->SetAllColor(off_color);
 
-            ESP_LOGI(TAG, "RGB lights turned off, final RGB values: R=%d, G=%d, B=%d",
-                     off_color.red, off_color.green, off_color.blue);
-
             ESP_LOGI(TAG, "RGB lights turned off");
 
             is_effect_running_ = false;
         }
         break;
     }
+
     case BREATHING_EFFECT:
     {
         // 使用正弦波函数创建平滑的呼吸效果
@@ -549,6 +531,7 @@ bool FogSeekLedController::StartEffect(EffectType type, int duration_ms)
 {
     if (!rgb_led_strip_ || is_effect_running_)
     {
+        ESP_LOGW(TAG, "Cannot start effect: strip not initialized or effect already running");
         return false;
     }
 
@@ -558,7 +541,7 @@ bool FogSeekLedController::StartEffect(EffectType type, int duration_ms)
 
     switch (type)
     {
-    case POWER_ON_SEQUENCE:
+    case MARQUEE_EFFECT:
         effect_total_steps_ = rgb_num_leds_;
         effect_current_step_ = 0;
         effect_delay_per_step_ = duration_ms / rgb_num_leds_;
@@ -588,7 +571,7 @@ bool FogSeekLedController::StartEffect(EffectType type, int duration_ms)
         is_effect_running_ = false;
         return false;
     }
-
+    ESP_LOGI(TAG, "Effect started: type %d, duration %d ms", type, duration_ms);
     return true;
 }
 
@@ -603,33 +586,36 @@ void FogSeekLedController::StopCurrentEffect()
     current_effect_type_ = NONE;
 }
 
-// 非阻塞版本的开机序列
-bool FogSeekLedController::PowerOnSequence(int total_time_ms)
+// 跑马灯效果，依次点亮所有灯
+bool FogSeekLedController::RunMarqueeLights(int total_time_ms)
 {
     if (!rgb_led_strip_ || rgb_num_leds_ == 0)
     {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
         return false;
     }
 
-    return StartEffect(POWER_ON_SEQUENCE, total_time_ms);
+    return StartEffect(MARQUEE_EFFECT, total_time_ms);
 }
 
-// 非阻塞版本的打开灯光
+// 打开灯光
 bool FogSeekLedController::TurnOnRgbLights(int duration_ms)
 {
     if (!rgb_led_strip_ || rgb_num_leds_ == 0)
     {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
         return false;
     }
 
     return StartEffect(TURN_ON_LIGHTS, duration_ms);
 }
 
-// 非阻塞版本的关闭灯光
+// 关闭灯光
 bool FogSeekLedController::TurnOffRgbLights(int duration_ms)
 {
     if (!rgb_led_strip_ || rgb_num_leds_ == 0)
     {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
         return false;
     }
 
@@ -697,7 +683,7 @@ void FogSeekLedController::IncreaseBrightness()
         // 更新当前颜色为新颜色
         current_color_ = new_color;
 
-        ESP_LOGI(TAG, "RGB values after brightness increase: R=%d, G=%d, B=%d",
+        ESP_LOGD(TAG, "RGB values after brightness increase: R=%d, G=%d, B=%d",
                  new_color.red, new_color.green, new_color.blue);
     }
     else
@@ -731,7 +717,7 @@ void FogSeekLedController::DecreaseBrightness()
         // 更新当前颜色为新颜色
         current_color_ = new_color;
 
-        ESP_LOGI(TAG, "RGB values after brightness decrease: R=%d, G=%d, B=%d",
+        ESP_LOGD(TAG, "RGB values after brightness decrease: R=%d, G=%d, B=%d",
                  new_color.red, new_color.green, new_color.blue);
     }
     else
@@ -741,12 +727,15 @@ void FogSeekLedController::DecreaseBrightness()
 }
 
 /**
- * @brief 将RGB灯带颜色变为随机颜色（红橙黄绿青蓝紫）
+ * @brief RGB灯带颜色更换（红橙黄绿青蓝紫）
  */
 void FogSeekLedController::ChangeToRandomColors()
 {
     if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+    {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
         return;
+    }
 
     // 定义彩虹颜色（红橙黄绿青蓝紫）
     StripColor rainbow_colors[] = {
@@ -760,10 +749,12 @@ void FogSeekLedController::ChangeToRandomColors()
     };
     int num_colors = sizeof(rainbow_colors) / sizeof(rainbow_colors[0]);
 
-    // 使用更简单的随机数生成方式，避免使用可能阻塞的random_device
-    uint32_t rand_val = esp_random(); // 使用ESP-IDF提供的随机数函数
-    int random_index = rand_val % num_colors;
-    StripColor selected_color = rainbow_colors[random_index];
+    // 按顺序选择下一个颜色
+    static int color_index = 0; // 静态变量用于记住上一次的颜色索引
+    StripColor selected_color = rainbow_colors[color_index % num_colors];
+
+    // 更新颜色索引以供下次调用
+    color_index++;
 
     // 保存原始颜色（未经过亮度调整的纯色）
     original_color_ = selected_color;
@@ -780,6 +771,6 @@ void FogSeekLedController::ChangeToRandomColors()
     // 更新当前颜色
     current_color_ = selected_color;
 
-    ESP_LOGI(TAG, "RGB lights changed to random rainbow colors, new RGB values: R=%d, G=%d, B=%d",
+    ESP_LOGI(TAG, "RGB lights changed to rainbow color, RGB: R=%d, G=%d, B=%d",
              current_color_.red, current_color_.green, current_color_.blue);
 }
