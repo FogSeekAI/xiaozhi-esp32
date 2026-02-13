@@ -72,7 +72,7 @@ private:
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
 
         // 初始化RGB灯带
-        rgb_led_strip_ = new CircularStrip((gpio_num_t)LED_RGB_GPIO, 8);
+        rgb_led_strip_ = new RgbLedStrip((gpio_num_t)LED_RGB_GPIO, 8);
     }
 
     // 初始化音频功放引脚并默认关闭功放
@@ -118,46 +118,19 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 // 循环切换RGB灯带颜色
-                                 static int color_index = 0;
-                                 switch (color_index)
-                                 {
-                                 case 0:
-                                     rgb_led_strip_->SetAllColor({255, 0, 255}); // 紫色
-                                     break;
-                                 case 1:
-                                     rgb_led_strip_->SetAllColor({0, 255, 0}); // 绿色
-                                     break;
-                                 case 2:
-                                     rgb_led_strip_->SetAllColor({255, 255, 0}); // 黄色
-                                     break;
-                                 case 3:
-                                     rgb_led_strip_->SetAllColor({0, 0, 255}); // 蓝色
-                                     break;
-                                 case 4:
-                                     rgb_led_strip_->SetAllColor({255, 165, 0}); // 橙色
-                                     break;
-                                 case 5:
-                                     rgb_led_strip_->SetAllColor({0, 255, 255}); // 青色
-                                     break;
-                                 default:
-                                     rgb_led_strip_->SetAllColor({255, 255, 255}); // 白色
-                                     break;
-                                 }
-                                 color_index = (color_index + 1) % 7; // 循环使用7种颜色
-
+                                 rgb_led_strip_->SetColor(255, 0, 0); // 红色
+                                 ESP_LOGI("RGB_TEST", "Test 1: Set all LEDs to RED");
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
-                                    rgb_led_strip_->SetAllColor({0, 0, 0}); // 双击关灯
-            auto &app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting)
-            {
-                EnterWifiConfigMode();
-                return;
-            } });
+                                       auto &app = Application::GetInstance();
+                                       if (app.GetDeviceState() == kDeviceStateStarting)
+                                       {
+                                           EnterWifiConfigMode();
+                                           return;
+                                       } });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -208,6 +181,7 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
+        // led_controller_.RunMarqueeLights(5000);          // 跑马灯开机灯效
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
@@ -223,8 +197,8 @@ private:
     // 关机流程
     void PowerOff()
     {
+        // led_controller_.TurnOffRgbLights(500); // 关机灯效
         SetExtensionPowerEnableState(false); // 关机时关闭扩展板电源使能
-
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
@@ -238,14 +212,14 @@ private:
     }
 
     // 初始化MCP工具
-    void InitializeMCP()
-    {
-        // 获取MCP服务器实例
-        auto &mcp_server = McpServer::GetInstance();
+    // void InitializeMCP()
+    // {
+    //     // 获取MCP服务器实例
+    //     auto &mcp_server = McpServer::GetInstance();
 
-        // 初始化RGB LED MCP 工具
-        InitializeRgbLedMCP(mcp_server, rgb_led_strip_);
-    }
+    //     // 初始化RGB LED特效 MCP 工具
+    //     InitializeRgbLedMCP(mcp_server, led_controller_);
+    // }
 
 public:
     FogSeekNanoLinkBitLumi() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
@@ -256,7 +230,7 @@ public:
         InitializeAudioAmplifier();
         InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
-        InitializeMCP();
+        // InitializeMCP();
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)

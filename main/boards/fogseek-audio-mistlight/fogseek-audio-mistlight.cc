@@ -64,7 +64,7 @@ private:
         led_controller_.SetRgbStrip(rgb_led_strip_, 16);
     }
 
-    // 初始化额外的GPIO控制引脚
+    // 初始化香氛电机控制引脚
     void InitializeGpioControls()
     {
         // 初始化电机控制器
@@ -89,19 +89,32 @@ private:
     }
 
     // 初始化音频输出控制
-    void InitializeAudioOutputControl()
-    {
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0); // 功放不支持使能控制，通过设置音量来替代使能，避免USB插入时自动播放声音
-    }
+    // void InitializeAudioOutputControl()
+    // {
+    //     auto codec = GetAudioCodec();
+    //     codec->SetOutputVolume(0); // 功放不支持使能控制，通过设置音量来替代使能，避免USB插入时自动播放声音
+    // }
 
     // 初始化按键回调
     void InitializeButtonCallbacks()
     {
+
         ctrl_button_.OnClick([this]()
-                             { fragrance_controller_.SetMode(FragranceController::Mode::WORK_MODE); });
+                             {
+                                 auto &app = Application::GetInstance();
+                                 app.ToggleChatState();                  // 切换聊天状态（打断）
+                                 led_controller_.ChangeToRandomColors(); // 切换灯光颜色
+                                 motor_controller_.ControlMotor(true); });
         ctrl_button_.OnDoubleClick([this]()
-                                   { fragrance_controller_.SetMode(FragranceController::Mode::SLEEP_AID_MODE); });
+                                   {
+                                       auto &app = Application::GetInstance();
+                                       if (app.GetDeviceState() == kDeviceStateStarting)
+                                       {
+                                           EnterWifiConfigMode();
+                                           return;
+                                       }
+                                       led_controller_.TurnOffRgbLights(); // 关闭灯光
+                                       motor_controller_.ControlMotor(false); });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -152,10 +165,10 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
-        led_controller_.RunMarqueeLights(5000);          // 使用新的跑马灯函数名
+        led_controller_.RunMarqueeLights(5000);          // 跑马灯开机灯效
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(70); // 开机后将音量设置为默认值
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(70); // 开机后将音量设置为默认值
 
         ESP_LOGI(TAG, "Device powered on.");
 
@@ -165,12 +178,12 @@ private:
     // 关机流程
     void PowerOff()
     {
+        led_controller_.TurnOffRgbLights(500); // 关机灯效
         power_manager_.PowerOff();
-        led_controller_.TurnOffRgbLights(500); // 平滑关闭灯光
         led_controller_.UpdateLedStatus(power_manager_);
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0); // 关机后将音量设置为默0
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(0); // 关机后将音量设置为默0
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
 
@@ -198,7 +211,7 @@ public:
     {
         InitializePowerManager();
         InitializeLedController();
-        InitializeAudioOutputControl();
+        // InitializeAudioOutputControl();
         InitializeGpioControls();
         InitializeButtonCallbacks();
         InitializeMCP();

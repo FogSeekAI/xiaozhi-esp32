@@ -153,14 +153,7 @@ private:
         auto &mcp_server = McpServer::GetInstance();
 
         // 初始化灯光 MCP 工具
-        InitializeLightMCP(mcp_server,
-                           led_controller_.GetColdLight(),
-                           led_controller_.GetWarmLight(),
-                           led_controller_.IsColdLightOn(),
-                           led_controller_.IsWarmLightOn());
-
-        // 初始化系统级MCP工具（如关机功能）
-        InitializeSystemMCP(mcp_server);
+        InitializeDualColorLightMCP(mcp_server, led_controller_);
     }
 
 public:

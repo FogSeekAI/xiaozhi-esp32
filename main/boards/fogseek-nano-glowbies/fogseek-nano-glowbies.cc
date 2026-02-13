@@ -14,6 +14,7 @@
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
 #include "mcp_tools.h"
+#include "boards/fogseek_common/media_storage.h" // 添加媒体存储头文件
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
@@ -35,6 +36,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
+    MediaStorage *media_storage_ = nullptr; // 添加媒体存储实例
 
     // 当前音量值
     int current_volume_ = 70; // 默认音量70
@@ -78,6 +80,84 @@ private:
 
         // 初始化RGB灯带
         rgb_led_strip_ = new CircularStrip((gpio_num_t)LED_RGB_GPIO, 19);
+    }
+
+    // 初始化媒体存储
+    void InitializeMediaStorage()
+    {
+        media_storage_ = new MediaStorage();
+
+        // 配置SD卡接口引脚（这些引脚需要根据硬件实际情况定义）
+        // 在config.h中应该定义这些GPIO引脚
+        media_storage_config_t config = {
+            .clk = SD_CLK_GPIO,
+            .cmd = SD_CMD_GPIO,
+            .d0 = SD_D0_GPIO};
+
+        // 初始化媒体存储
+        esp_err_t ret = media_storage_->Initialize(&config);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Media storage initialization failed: %s", esp_err_to_name(ret));
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Media storage initialized successfully");
+
+            // 执行简单的测试
+            TestMediaStorage();
+        }
+    }
+
+    // 媒体存储简单测试
+    void TestMediaStorage()
+    {
+        if (!media_storage_ || !media_storage_->is_initialized())
+        {
+            ESP_LOGE(TAG, "Media storage not initialized, skipping test");
+            return;
+        }
+
+        ESP_LOGI(TAG, "Starting media storage test...");
+
+        // 测试写入文件
+        const char *test_file_path = "/test.txt";
+        const char *test_data = "Hello, FogSeek Nano Glowbies!";
+        esp_err_t ret = media_storage_->write_file(test_file_path, test_data);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Write file failed: %s", esp_err_to_name(ret));
+        }
+        else
+        {
+            ESP_LOGI(TAG, "Write file successful");
+        }
+
+        // 检查文件是否存在
+        if (media_storage_->file_exists(test_file_path))
+        {
+            ESP_LOGI(TAG, "File %s exists", test_file_path);
+
+            // 读取文件测试
+            ret = media_storage_->read_file(test_file_path);
+            if (ret != ESP_OK)
+            {
+                ESP_LOGE(TAG, "Read file failed: %s", esp_err_to_name(ret));
+            }
+            else
+            {
+                ESP_LOGI(TAG, "Read file successful");
+            }
+        }
+        else
+        {
+            ESP_LOGW(TAG, "File %s does not exist", test_file_path);
+        }
+
+        // 打印SD卡信息
+        media_storage_->print_info();
+
+        ESP_LOGI(TAG, "Media storage test completed");
     }
 
     // 初始化音频功放引脚并默认关闭功放
@@ -178,8 +258,11 @@ private:
                                             }
                                             color_index = (color_index + 1) % 7; // 循环使用7种颜色
                                             ESP_LOGI(TAG, "Bluetooth/WiFi connect button pressed");
-                                            // 可以在这里添加蓝牙或WiFi连接逻辑
-                                        });
+                                            
+                                            // 执行媒体存储测试
+                                            if (media_storage_ && media_storage_->is_initialized()) {
+                                                TestMediaStorage();
+                                            } });
 
         ctrl_button_.OnClick([this]()
                              {
@@ -298,16 +381,6 @@ private:
         ESP_LOGI(TAG, "Device powered off.");
     }
 
-    // 初始化MCP工具
-    void InitializeMCP()
-    {
-        // 获取MCP服务器实例
-        auto &mcp_server = McpServer::GetInstance();
-
-        // 初始化RGB LED MCP 工具
-        InitializeRgbLedMCP(mcp_server, rgb_led_strip_);
-    }
-
 public:
     FogSeekNanoGlowbies() : boot_button_(BOOT_BUTTON_GPIO),
                             ctrl_button_(CTRL_BUTTON_GPIO),
@@ -321,7 +394,9 @@ public:
         // InitializeAudioAmplifier();
         InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
-        InitializeMCP();
+
+        // 初始化媒体存储
+        InitializeMediaStorage();
 
         // 设置电源状态变化回调函数
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
@@ -364,6 +439,14 @@ public:
         {
             delete rgb_led_strip_;
             rgb_led_strip_ = nullptr;
+        }
+
+        // 删除媒体存储对象
+        if (media_storage_)
+        {
+            media_storage_->deinit();
+            delete media_storage_;
+            media_storage_ = nullptr;
         }
     }
 };

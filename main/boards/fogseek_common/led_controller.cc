@@ -119,6 +119,55 @@ void GreenLed::OnStateChanged()
     ESP_LOGD(TAG, "Green LED updated for device state: %d", static_cast<int>(device_state));
 }
 
+// ==================== RgbStrip Implementation ====================
+RgbLedStrip::RgbLedStrip(gpio_num_t gpio, uint8_t num_leds)
+    : CircularStrip(gpio, num_leds), num_leds_(num_leds)
+{
+    led_cache_.resize(num_leds_, {0, 0, 0});
+    ESP_LOGI("RgbLedStrip", "Initialized with %d LEDs", num_leds_);
+}
+
+void RgbLedStrip::SetColor(uint8_t r, uint8_t g, uint8_t b)
+{
+    current_color_ = {r, g, b};
+    StripColor color = {r, g, b};
+    SetAllColor(color);
+    std::fill(led_cache_.begin(), led_cache_.end(), color);
+}
+
+void RgbLedStrip::SetSingle(uint8_t index, uint8_t r, uint8_t g, uint8_t b)
+{
+    if (index >= num_leds_)
+        return;
+    StripColor color = {r, g, b};
+    led_cache_[index] = color;
+    SetSingleColor(index, color);
+}
+
+void RgbLedStrip::SetMultiple(const std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t>> &configs)
+{
+    for (const auto &config : configs)
+    {
+        uint8_t index = std::get<0>(config);
+        uint8_t r = std::get<1>(config);
+        uint8_t g = std::get<2>(config);
+        uint8_t b = std::get<3>(config);
+        SetSingle(index, r, g, b);
+    }
+}
+
+void RgbLedStrip::SetBackground(uint8_t r, uint8_t g, uint8_t b)
+{
+    background_color_ = {r, g, b};
+}
+
+void RgbLedStrip::ResetToBackground()
+{
+    SetAllColor(background_color_);
+    current_color_ = background_color_;
+    std::fill(led_cache_.begin(), led_cache_.end(), background_color_);
+}
+
 // ==================== FogSeekLedController Implementation ====================
 
 /**
@@ -773,4 +822,129 @@ void FogSeekLedController::ChangeToRandomColors()
 
     ESP_LOGI(TAG, "RGB lights changed to rainbow color, RGB: R=%d, G=%d, B=%d",
              current_color_.red, current_color_.green, current_color_.blue);
+}
+
+/**
+ * @brief 设置RGB灯带自定义颜色
+ */
+void FogSeekLedController::SetCustomColor(uint8_t red, uint8_t green, uint8_t blue)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+    {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
+        return;
+    }
+
+    // 保存原始颜色（未经过亮度调整的纯色）
+    original_color_ = {red, green, blue};
+
+    // 根据当前亮度级别调整颜色强度
+    uint8_t brightness_factor = brightness_levels_[current_brightness_level_];
+    StripColor adjusted_color = {
+        .red = static_cast<uint8_t>((red * brightness_factor) / 100),
+        .green = static_cast<uint8_t>((green * brightness_factor) / 100),
+        .blue = static_cast<uint8_t>((blue * brightness_factor) / 100)};
+
+    // 将自定义颜色设置给所有灯珠
+    rgb_led_strip_->SetAllColor(adjusted_color);
+
+    // 更新当前颜色
+    current_color_ = adjusted_color;
+
+    ESP_LOGI(TAG, "RGB lights set to custom color, RGB: R=%d, G=%d, B=%d",
+             current_color_.red, current_color_.green, current_color_.blue);
+}
+
+/**
+ * @brief 设置单个LED的颜色
+ */
+void FogSeekLedController::SetSingleLedColor(uint8_t led_index, uint8_t red, uint8_t green, uint8_t blue)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+    {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
+        return;
+    }
+
+    if (led_index >= rgb_num_leds_)
+    {
+        ESP_LOGW(TAG, "LED index %d is out of range (0-%d)", led_index, rgb_num_leds_ - 1);
+        return;
+    }
+
+    // 创建并设置单个LED的颜色
+    StripColor color = {red, green, blue};
+    rgb_led_strip_->SetSingleColor(led_index, color);
+
+    ESP_LOGI(TAG, "LED %d set to custom color, RGB: R=%d, G=%d, B=%d",
+             led_index, red, green, blue);
+}
+
+/**
+ * @brief 设置RGB LED彩虹效果，每个LED显示不同颜色
+ */
+void FogSeekLedController::SetRainbowColor()
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+    {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
+        return;
+    }
+
+    // 定义彩虹颜色数组（红、橙、黄、绿、青、蓝、紫）
+    StripColor rainbow_colors[] = {
+        {255, 0, 0},   // 红色
+        {255, 165, 0}, // 橙色
+        {255, 255, 0}, // 黄色
+        {0, 255, 0},   // 绿色
+        {0, 127, 255}, // 青色
+        {0, 0, 255},   // 蓝色
+        {139, 0, 255}  // 紫色
+    };
+
+    int num_colors = sizeof(rainbow_colors) / sizeof(rainbow_colors[0]);
+
+    // 为每个LED设置不同颜色
+    for (int i = 0; i < rgb_num_leds_; i++)
+    {
+        StripColor color = rainbow_colors[i % num_colors];
+        rgb_led_strip_->SetSingleColor(i, color);
+    }
+
+    ESP_LOGI(TAG, "Rainbow color effect set for all %d LEDs", rgb_num_leds_);
+}
+
+/**
+ * @brief 设置多个LED的不同颜色
+ */
+void FogSeekLedController::SetMultipleLedColors(const std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t>> &led_colors)
+{
+    if (!rgb_led_strip_ || rgb_num_leds_ == 0)
+    {
+        ESP_LOGW(TAG, "RGB strip not initialized or has 0 LEDs");
+        return;
+    }
+
+    // 遍历传入的颜色向量，为每个指定的LED设置颜色
+    for (const auto &color_data : led_colors)
+    {
+        uint8_t led_index = std::get<0>(color_data);
+        uint8_t red = std::get<1>(color_data);
+        uint8_t green = std::get<2>(color_data);
+        uint8_t blue = std::get<3>(color_data);
+
+        if (led_index >= rgb_num_leds_)
+        {
+            ESP_LOGW(TAG, "LED index %d is out of range (0-%d)", led_index, rgb_num_leds_ - 1);
+            continue; // 跳过无效的LED索引
+        }
+
+        // 设置指定LED的颜色
+        StripColor color = {red, green, blue};
+        rgb_led_strip_->SetSingleColor(led_index, color);
+
+        ESP_LOGD(TAG, "LED %d set to color - R: %d, G: %d, B: %d", led_index, red, green, blue);
+    }
+
+    ESP_LOGI(TAG, "%zu individual LED colors set", led_colors.size());
 }

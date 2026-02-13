@@ -64,6 +64,40 @@ private:
     bool ignore_state_changes_ = false; // 是否忽略设备状态变化
 };
 
+/**
+ * @brief 扩展的RGB灯带类
+ * 继承自CircularStrip
+ */
+class RgbLedStrip : public CircularStrip // 改名
+{
+public:
+    /**
+     * @brief 构造函数
+     * @param gpio GPIO引脚号
+     * @param num_leds LED数量
+     */
+    RgbLedStrip(gpio_num_t gpio, uint8_t num_leds);
+
+    // 基础控制方法
+    void SetColor(uint8_t r, uint8_t g, uint8_t b);
+    void SetSingle(uint8_t index, uint8_t r, uint8_t g, uint8_t b);
+    void SetMultiple(const std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t>> &configs);
+
+    // 状态管理
+    void SetBackground(uint8_t r, uint8_t g, uint8_t b);
+    void ResetToBackground();
+
+    // 查询接口
+    StripColor GetCurrentColor() const { return current_color_; }
+    StripColor GetBackground() const { return background_color_; }
+
+private:
+    uint8_t num_leds_;
+    StripColor current_color_ = {255, 255, 255};
+    StripColor background_color_ = {0, 0, 0};
+    std::vector<StripColor> led_cache_;
+};
+
 // 用于区分不同效果的枚举 - 需要在类外部声明以供内部使用
 enum EffectType
 {
@@ -111,6 +145,12 @@ public:
     void ChangeToRandomColors();                              // 随机变化颜色（红橙黄绿青蓝紫）
     bool StartBreathingEffect(int cycle_duration_ms = 4000);  // 开始呼吸效果，cycle_duration_ms为一个完整周期的时间
     void StopBreathingEffect();                               // 停止呼吸效果
+
+    // 自定义颜色控制方法
+    void SetCustomColor(uint8_t red, uint8_t green, uint8_t blue);                                            // 设置自定义颜色
+    void SetSingleLedColor(uint8_t led_index, uint8_t red, uint8_t green, uint8_t blue);                      // 设置单个LED的颜色
+    void SetRainbowColor();                                                                                   // 设置彩虹颜色，每个LED显示不同颜色
+    void SetMultipleLedColors(const std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t>> &led_colors); // 设置多个LED的不同颜色 (index, r, g, b)
 
     // 获取LED实例的方法
     RedLed *GetRedLed() const { return red_led_; }
