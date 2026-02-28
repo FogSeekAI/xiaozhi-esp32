@@ -54,4 +54,13 @@ void InitializeFragranceMCP(
     McpServer &mcp_server,
     FragranceController &fragrance_controller);
 
+/**
+ * @brief 初始化灯光板控制 MCP 工具函数
+ * @param mcp_server MCP 服务器实例
+ * @param set_light_state_func 设置灯光状态的回调函数
+ */
+void InitializeLightPanelMCP(
+    McpServer &mcp_server,
+    std::function<void(bool)> set_light_state_func);
+
 #endif // _FOGSEEK_MCP_TOOLS_H_

@@ -2,7 +2,7 @@
 #include "config.h"
 #include "power_manager.h"
 #include "led_controller.h"
-#include "codecs/es8389_audio_codec.h"
+#include "codecs/box_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
@@ -17,9 +17,9 @@
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 
-#define TAG "FogSeekNano"
+#define TAG "FogSeekEdge"
 
-class FogSeekNano : public WifiBoard
+class FogSeekEdge : public WifiBoard
 {
 private:
     Button boot_button_;
@@ -94,7 +94,9 @@ private:
         ctrl_button_.OnClick([this]()
                              {
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                                 app.PlaySound(Lang::Sounds::OGG_WELCOME);
+                                 vTaskDelay(pdMS_TO_TICKS(1000)); // 延时500ms播放音效
+                                 app.ToggleChatState();           // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
@@ -139,7 +141,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNano *>(arg);
+                auto instance = static_cast<FogSeekEdge *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -180,7 +182,7 @@ private:
     }
 
 public:
-    FogSeekNano() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekEdge() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
@@ -195,9 +197,8 @@ public:
 
     virtual AudioCodec *GetAudioCodec() override
     {
-        static Es8389AudioCodec audio_codec(
+        static BoxAudioCodec audio_codec(
             i2c_bus_,
-            (i2c_port_t)0,
             AUDIO_INPUT_SAMPLE_RATE,
             AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_GPIO_MCLK,
@@ -206,13 +207,13 @@ public:
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
             AUDIO_CODEC_PA_PIN,
-            AUDIO_CODEC_ES8389_ADDR,
-            true,
-            true);
+            AUDIO_CODEC_ES8311_ADDR,
+            AUDIO_CODEC_ES7210_ADDR,
+            AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
 
-    ~FogSeekNano()
+    ~FogSeekEdge()
     {
         if (i2c_bus_)
         {
@@ -221,4 +222,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekNano);
+DECLARE_BOARD(FogSeekEdge);

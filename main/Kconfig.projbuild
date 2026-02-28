@@ -161,6 +161,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO_LCD1_8
         bool "Fogseek Nano-LCD1.8"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_EDGE
+        bool "Fogseek Edge"
+        depends on IDF_TARGET_ESP32S3    
     config BOARD_TYPE_FOGSEEK_AUDIO_MOODLIGHT
         bool "Fogseek MoodLight"
         depends on IDF_TARGET_ESP32S3
@@ -199,6 +202,9 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_MISTLIGHT
         bool "Zhumian MistLight Pro"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_AUDIO_WOODLIGHT
+        bool "Zhumian WoodLight"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_GLOWBIES
         bool "Glowbies"
@@ -725,7 +731,8 @@ config USE_DEVICE_AEC
         || BOARD_TYPE_ECHOEAR || BOARD_TYPE_WAVESHARE_S3_TOUCH_LCD_3_49 \
         || BOARD_TYPE_FOGSEEK_NANO || BOARD_TYPE_FOGSEEK_NANO_KIT || BOARD_TYPE_FOGSEEK_NANO_LCD1_8 \
         || BOARD_TYPE_FOGSEEK_NANO_LINKBIT || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_LUMI || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_LUMI_4G || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_VISION || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_VISION_4G \
-        || BOARD_TYPE_FOGSEEK_NANO_SPIN || BOARD_TYPE_FOGSEEK_NANO_SPIN_4G || BOARD_TYPE_FOGSEEK_NANO_XIAOYA || BOARD_TYPE_FOGSEEK_NANO_MISTLIGHT || BOARD_TYPE_FOGSEEK_NANO_GLOWBIES)
+        || BOARD_TYPE_FOGSEEK_NANO_SPIN || BOARD_TYPE_FOGSEEK_NANO_SPIN_4G || BOARD_TYPE_FOGSEEK_NANO_XIAOYA || BOARD_TYPE_FOGSEEK_NANO_MISTLIGHT || BOARD_TYPE_FOGSEEK_NANO_GLOWBIES \
+        || BOARD_TYPE_FOGSEEK_EDGE)
     help
         To work properly, device-side AEC requires a clean output reference path from the speaker signal and physical acoustic isolation between the microphone and speaker.
 

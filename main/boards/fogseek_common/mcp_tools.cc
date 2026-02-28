@@ -488,3 +488,27 @@ void InitializeFragranceMCP(
                            return result;
                        });
 }
+
+void InitializeLightPanelMCP(
+    McpServer &mcp_server,
+    std::function<void(bool)> set_light_state_func)
+{
+    // 添加控制灯光板开关的工具函数
+    mcp_server.AddTool("self.light_panel.set_state",
+                       "控制灯光板的开关状态，适用于控制背光或照明面板的场景。",
+                       PropertyList({Property("state", kPropertyTypeBoolean, false)}),
+                       [set_light_state_func](const PropertyList &properties) -> ReturnValue
+                       {
+                           bool state = properties["state"].value<bool>();
+
+                           // 调用传入的回调函数来设置灯光状态
+                           set_light_state_func(state);
+
+                           ESP_LOGI(TAG, "Light panel control - State: %s", state ? "ON" : "OFF");
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"state\":" +
+                                                  std::string(state ? "true" : "false") + "}";
+                           return response;
+                       });
+}

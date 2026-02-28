@@ -2,6 +2,7 @@
 #include "config.h"
 #include "power_manager.h"
 #include "led_controller.h"
+#include "motor_controller.h"
 #include "codecs/es8389_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
@@ -9,27 +10,29 @@
 #include "mcp_server.h"
 #include "lamp_controller.h"
 #include "led/single_led.h"
+#include "led/circular_strip.h"
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
+#include "mcp_tools.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 
-#define TAG "FogSeekNano"
+#define TAG "FogSeekNanoWoodLight"
 
-class FogSeekNano : public WifiBoard
+class FogSeekNanoWoodLight : public WifiBoard
 {
 private:
     Button boot_button_;
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
+    bool light_state_ = true; // 跟踪灯光状态
 
     // 初始化I2C外设
     void InitializeI2c()
@@ -88,22 +91,47 @@ private:
         gpio_set_level(AUDIO_CODEC_PA_PIN, enable ? 1 : 0);
     }
 
+    // 初始化灯光板电源使能引脚
+    void InitializeLightController()
+    {
+        gpio_config_t io_conf;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pin_bit_mask = (1ULL << LCD_BL_GPIO);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        gpio_config(&io_conf);
+        SetLightState(true); // 默认关闭状态（高电平）
+    }
+
+    // 设置灯光板电源使能状态（低电平打开，高电平关闭）
+    void SetLightState(bool enable)
+    {
+        // 由于硬件使用三极管，低电平导通，所以逻辑要反转
+        gpio_set_level(LCD_BL_GPIO, enable ? 0 : 1); // true时输出低电平，false时输出高电平
+    }
+
     // 初始化按键回调
     void InitializeButtonCallbacks()
     {
         ctrl_button_.OnClick([this]()
                              {
+                                 // 切换灯光状态
+                                 light_state_ = !light_state_;
+                                 SetLightState(light_state_);
+
+                                 // 同时切换聊天状态（保持原有功能）
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
-            auto &app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting)
-            {
-                EnterWifiConfigMode();
-                return;
-            } });
+                                    auto &app = Application::GetInstance();
+                                    if (app.GetDeviceState() == kDeviceStateStarting)
+                                    {
+                                        EnterWifiConfigMode();
+                                        return;
+                                    } });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -139,7 +167,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNano *>(arg);
+                auto instance = static_cast<FogSeekNanoWoodLight *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -179,18 +207,39 @@ private:
         ESP_LOGI(TAG, "Device powered off.");
     }
 
+    // 初始化MCP工具
+    void InitializeMCP()
+    {
+        // 获取MCP服务器实例
+        auto &mcp_server = McpServer::GetInstance();
+
+        // 初始化系统级MCP工具（如关机功能）
+        InitializeSystemMCP(mcp_server, power_manager_);
+
+        // 初始化灯光板MCP工具
+        InitializeLightPanelMCP(mcp_server, [this](bool state)
+                                { this->SetLightState(state); });
+    }
+
 public:
-    FogSeekNano() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekNanoWoodLight() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
+        InitializeLightController();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
+        InitializeMCP();
 
-        // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
+        // 设置电源状态变化回调函数
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
+    }
+
+    virtual Led *GetLed() override
+    {
+        return led_controller_.GetGreenLed();
     }
 
     virtual AudioCodec *GetAudioCodec() override
@@ -212,7 +261,7 @@ public:
         return &audio_codec;
     }
 
-    ~FogSeekNano()
+    ~FogSeekNanoWoodLight()
     {
         if (i2c_bus_)
         {
@@ -221,4 +270,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekNano);
+DECLARE_BOARD(FogSeekNanoWoodLight);
