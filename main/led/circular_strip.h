@@ -22,6 +22,8 @@ class CircularStrip : public Led
 public:
     CircularStrip(gpio_num_t gpio, uint8_t max_leds);
     virtual ~CircularStrip();
+    led_strip_handle_t led_strip_ = nullptr;
+    esp_timer_handle_t strip_timer_ = nullptr;
 
     void OnStateChanged() override;
     void SetBrightness(uint8_t default_brightness, uint8_t low_brightness);
@@ -37,12 +39,10 @@ protected:
 private:
     std::mutex mutex_;
     TaskHandle_t blink_task_ = nullptr;
-    led_strip_handle_t led_strip_ = nullptr;
     int max_leds_ = 0;
     std::vector<StripColor> colors_;
     int blink_counter_ = 0;
     int blink_interval_ms_ = 0;
-    esp_timer_handle_t strip_timer_ = nullptr;
     std::function<void()> strip_callback_ = nullptr;
 
     uint8_t default_brightness_ = DEFAULT_BRIGHTNESS;

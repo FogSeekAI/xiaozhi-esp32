@@ -17,10 +17,11 @@
 #define PWR_CHARGING_GPIO GPIO_NUM_15
 #define BATTERY_ADC_GPIO GPIO_NUM_10 // 电池电压检测ADC1_CH9
 
-// LED相关配置
+// LED 相关配置
 #define LED_RED_GPIO GPIO_NUM_48
 #define LED_GREEN_GPIO GPIO_NUM_47
 #define LED_RGB_GPIO GPIO_NUM_9
+#define LED_RGB_NUM_LEDS 19  // RGB 灯带 LED 数量
 
 // 音频相关配置
 #define AUDIO_INPUT_SAMPLE_RATE 24000

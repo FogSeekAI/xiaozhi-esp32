@@ -96,16 +96,18 @@ private:
         gpio_set_level(ML307_ENABLE_GPIO, 1);
     }
 
-    // 初始化LED控制器
+    // 初始化LED 控制器
     void InitializeLedController()
     {
         led_pin_config_t led_pin_config = {
             .red_gpio = LED_RED_GPIO,
-            .green_gpio = LED_GREEN_GPIO};
+            .green_gpio = LED_GREEN_GPIO,
+            .rgb_gpio = LED_RGB_GPIO,
+            .rgb_num_leds = LED_RGB_NUM_LEDS};
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
 
-        // 初始化RGB灯带
-        rgb_led_strip_ = new CircularStrip((gpio_num_t)LED_RGB_GPIO, 8);
+        // 从 LED 控制器获取 RGB 灯带实例
+        rgb_led_strip_ = led_controller_.GetRgbLedStrip();
     }
 
     // 初始化音频功放引脚并默认关闭功放

@@ -135,153 +135,9 @@ void InitializeRgbLedMCP(
     McpServer &mcp_server,
     FogSeekLedController &led_controller)
 {
-    // 添加RGB LED跑马灯效果的工具函数
-    mcp_server.AddTool("self.light.run_marquee_lights",
-                       "打开跑马灯，运行RGB LED灯带的跑马灯效果，在指定时间内依次点亮所有灯，营造氛围感。大模型应该根据用户的需求和场景描述，选择合适的跑马灯持续时间。",
-                       PropertyList({Property("total_time_ms", kPropertyTypeInteger, 100, 30000)}), // 默认5秒跑马灯效果
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           int total_time_ms = properties["total_time_ms"].value<int>();
-                           if (total_time_ms <= 0)
-                           {
-                               total_time_ms = 5000; // 默认5秒
-                           }
-
-                           bool result = led_controller.RunMarqueeLights(total_time_ms);
-
-                           ESP_LOGI(TAG, "RGB LED marquee lights effect %s - Duration: %d ms",
-                                    result ? "started" : "failed", total_time_ms);
-
-                           std::string response = "{\"success\":" + std::string(result ? "true" : "false") +
-                                                  ",\"total_time_ms\":" + std::to_string(total_time_ms) + "}";
-                           return response;
-                       });
-
-    // 添加RGB LED打开灯光效果的工具函数
-    mcp_server.AddTool("self.light.turn_on_lights",
-                       "打开灯光，打开RGB LED灯带，使灯光在指定时间内从暗逐渐变亮到当前设置的亮度。",
-                       PropertyList({Property("duration_ms", kPropertyTypeInteger, 100, 5000)}), // 默认1秒渐亮
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           int duration_ms = properties["duration_ms"].value<int>();
-                           if (duration_ms <= 0)
-                           {
-                               duration_ms = 1000; // 默认1秒
-                           }
-
-                           bool result = led_controller.TurnOnRgbLights(duration_ms);
-
-                           ESP_LOGI(TAG, "RGB LED turn on effect %s - Duration: %d ms",
-                                    result ? "started" : "failed", duration_ms);
-
-                           std::string response = "{\"success\":" + std::string(result ? "true" : "false") +
-                                                  ",\"duration_ms\":" + std::to_string(duration_ms) + "}";
-                           return response;
-                       });
-
-    // 添加RGB LED关闭灯光效果的工具函数
-    mcp_server.AddTool("self.light.turn_off_lights",
-                       "关闭灯光，关闭RGB LED灯带，使灯光在指定时间内从亮逐渐变暗直到完全关闭。",
-                       PropertyList({Property("duration_ms", kPropertyTypeInteger, 100, 5000)}), // 默认1秒渐暗
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           int duration_ms = properties["duration_ms"].value<int>();
-                           if (duration_ms <= 0)
-                           {
-                               duration_ms = 1000; // 默认1秒
-                           }
-
-                           bool result = led_controller.TurnOffRgbLights(duration_ms);
-
-                           ESP_LOGI(TAG, "RGB LED turn off effect %s - Duration: %d ms",
-                                    result ? "started" : "failed", duration_ms);
-
-                           std::string response = "{\"success\":" + std::string(result ? "true" : "false") +
-                                                  ",\"duration_ms\":" + std::to_string(duration_ms) + "}";
-                           return response;
-                       });
-
-    // 添加RGB LED增加亮度的工具函数
-    mcp_server.AddTool("self.light.increase_brightness",
-                       "增加亮度，增加RGB LED灯带的亮度一个档位，适用于需要更亮环境的场景。",
-                       PropertyList(),
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           led_controller.IncreaseBrightness();
-
-                           ESP_LOGI(TAG, "RGB LED brightness increased");
-
-                           std::string response = "{\"success\":true}";
-                           return response;
-                       });
-
-    // 添加RGB LED降低亮度的工具函数
-    mcp_server.AddTool("self.light.decrease_brightness",
-                       "降低亮度，降低RGB LED灯带的亮度一个档位，适用于需要更柔和光线的场景。",
-                       PropertyList(),
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           led_controller.DecreaseBrightness();
-
-                           ESP_LOGI(TAG, "RGB LED brightness decreased");
-
-                           std::string response = "{\"success\":true}";
-                           return response;
-                       });
-
-    // 添加RGB LED随机颜色变化的工具函数
-    mcp_server.AddTool("self.light.change_random_colors",
-                       "改变灯光颜色，随机变化RGB LED灯带的颜色（红橙黄绿青蓝紫），适用于需要多彩氛围的场景。",
-                       PropertyList(),
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           led_controller.ChangeToRandomColors();
-
-                           ESP_LOGI(TAG, "RGB LED color changed to random color");
-
-                           std::string response = "{\"success\":true}";
-                           return response;
-                       });
-
-    // 添加RGB LED呼吸效果的工具函数
-    mcp_server.AddTool("self.light.start_breathing_effect",
-                       "开始呼吸灯效果，RGB LED灯带会柔和地明暗循环变化，适用于放松、冥想或营造温馨氛围的场景。",
-                       PropertyList({Property("cycle_duration_ms", kPropertyTypeInteger, 4000, 1000, 10000)}), // 默认4秒周期，范围1-10秒
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           int cycle_duration_ms = properties["cycle_duration_ms"].value<int>();
-                           if (cycle_duration_ms <= 0)
-                           {
-                               cycle_duration_ms = 4000; // 默认4秒
-                           }
-
-                           bool result = led_controller.StartBreathingEffect(cycle_duration_ms);
-
-                           ESP_LOGI(TAG, "RGB LED breathing effect %s - Cycle Duration: %d ms",
-                                    result ? "started" : "failed", cycle_duration_ms);
-
-                           std::string response = "{\"success\":" + std::string(result ? "true" : "false") +
-                                                  ",\"cycle_duration_ms\":" + std::to_string(cycle_duration_ms) + "}";
-                           return response;
-                       });
-
-    // 添加停止RGB LED呼吸效果的工具函数
-    mcp_server.AddTool("self.light.stop_breathing_effect",
-                       "停止呼吸灯效果，结束RGB LED灯带的呼吸效果，恢复到常规灯光模式。",
-                       PropertyList(),
-                       [&led_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           led_controller.StopBreathingEffect();
-
-                           ESP_LOGI(TAG, "RGB LED breathing effect stopped");
-
-                           std::string response = "{\"success\":true}";
-                           return response;
-                       });
-
-    // 添加RGB LED自定义颜色的工具函数
-    mcp_server.AddTool("self.light.set_custom_color",
-                       "设置RGB LED灯带的自定义颜色，可以控制任意颜色。",
+    // 添加RGB LED 统一设置所有灯光颜色的工具函数
+    mcp_server.AddTool("self.light.set_all_color",
+                       "统一设置所有灯光颜色，一次性更新所有 LED 灯珠颜色，可以控制任意颜色，适用于需要整体氛围一致的场景。",
                        PropertyList({Property("red", kPropertyTypeInteger, 0, 255),
                                      Property("green", kPropertyTypeInteger, 0, 255),
                                      Property("blue", kPropertyTypeInteger, 0, 255)}),
@@ -291,12 +147,12 @@ void InitializeRgbLedMCP(
                            int green = properties["green"].value<int>();
                            int blue = properties["blue"].value<int>();
 
-                           led_controller.SetCustomColor(
-                               static_cast<uint8_t>(red),
-                               static_cast<uint8_t>(green),
-                               static_cast<uint8_t>(blue));
+                           StripColor color = {static_cast<uint8_t>(red),
+                                               static_cast<uint8_t>(green),
+                                               static_cast<uint8_t>(blue)};
 
-                           ESP_LOGI(TAG, "RGB LED set to custom color - R: %d, G: %d, B: %d",
+                           led_controller.GetRgbLedStrip()->SetAllColor(color);
+                           ESP_LOGI(TAG, "RGB LED all lights set to color - R: %d, G: %d, B: %d",
                                     red, green, blue);
 
                            std::string response = "{\"success\":true"
@@ -307,54 +163,212 @@ void InitializeRgbLedMCP(
                            return response;
                        });
 
-    // 添加RGB LED设置单个LED颜色的工具函数
-    mcp_server.AddTool("self.light.set_single_led_color",
-                       "设置RGB LED灯带中单个LED的颜色，可以控制任意一个LED显示不同颜色。",
-                       PropertyList({Property("led_index", kPropertyTypeInteger, 0, 15), // 假设最多16个LED
+    // 添加RGB LED 单个灯光颜色控制的工具函数
+    mcp_server.AddTool("self.light.set_single_color",
+                       "设置单个 LED 灯珠的颜色，可以指定灯珠索引和颜色值，通过重复调用可以依次设置每一个灯光成不同颜色，实现彩虹、渐变等复杂效果。",
+                       PropertyList({Property("index", kPropertyTypeInteger, 0, 7),
                                      Property("red", kPropertyTypeInteger, 0, 255),
                                      Property("green", kPropertyTypeInteger, 0, 255),
                                      Property("blue", kPropertyTypeInteger, 0, 255)}),
                        [&led_controller](const PropertyList &properties) -> ReturnValue
                        {
-                           int led_index = properties["led_index"].value<int>();
+                           int index = properties["index"].value<int>();
                            int red = properties["red"].value<int>();
                            int green = properties["green"].value<int>();
                            int blue = properties["blue"].value<int>();
 
-                           led_controller.SetSingleLedColor(
-                               static_cast<uint8_t>(led_index),
-                               static_cast<uint8_t>(red),
-                               static_cast<uint8_t>(green),
-                               static_cast<uint8_t>(blue));
+                           StripColor color = {static_cast<uint8_t>(red),
+                                               static_cast<uint8_t>(green),
+                                               static_cast<uint8_t>(blue)};
 
-                           ESP_LOGI(TAG, "Single LED %d set to color - R: %d, G: %d, B: %d",
-                                    led_index, red, green, blue);
+                           led_controller.GetRgbLedStrip()->SetSingleColor(static_cast<uint8_t>(index), color);
+                           ESP_LOGI(TAG, "RGB LED single light set - Index: %d, R: %d, G: %d, B: %d",
+                                    index, red, green, blue);
 
                            std::string response = "{\"success\":true"
-                                                  ",\"led_index\":" +
-                                                  std::to_string(led_index) +
+                                                  ",\"index\":" +
+                                                  std::to_string(index) +
                                                   ",\"red\":" + std::to_string(red) +
                                                   ",\"green\":" + std::to_string(green) +
                                                   ",\"blue\":" + std::to_string(blue) + "}";
                            return response;
                        });
 
-    // 添加RGB LED彩虹效果的工具函数
-    mcp_server.AddTool("self.light.set_rainbow_color",
-                       "设置RGB LED灯带的彩虹效果，每个LED依次显示不同颜色（红橙黄绿青蓝紫），营造多彩氛围。",
+    // 添加RGB LED 闪烁效果的工具函数
+    mcp_server.AddTool("self.light.blink",
+                       "让所有 LED 灯珠以指定颜色和间隔时间进行闪烁，适用于警示、提醒等场景。",
+                       PropertyList({Property("red", kPropertyTypeInteger, 0, 255),
+                                     Property("green", kPropertyTypeInteger, 0, 255),
+                                     Property("blue", kPropertyTypeInteger, 0, 255),
+                                     Property("interval_ms", kPropertyTypeInteger, 500, 100, 5000)}),
+                       [&led_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           int red = properties["red"].value<int>();
+                           int green = properties["green"].value<int>();
+                           int blue = properties["blue"].value<int>();
+                           int interval_ms = properties["interval_ms"].value<int>();
+
+                           StripColor color = {static_cast<uint8_t>(red),
+                                               static_cast<uint8_t>(green),
+                                               static_cast<uint8_t>(blue)};
+
+                           led_controller.GetRgbLedStrip()->Blink(color, interval_ms);
+                           ESP_LOGI(TAG, "RGB LED blink started - Color: R:%d, G:%d, B:%d, Interval: %dms",
+                                    red, green, blue, interval_ms);
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"red\":" +
+                                                  std::to_string(red) +
+                                                  ",\"green\":" + std::to_string(green) +
+                                                  ",\"blue\":" + std::to_string(blue) +
+                                                  ",\"interval_ms\":" + std::to_string(interval_ms) + "}";
+                           return response;
+                       });
+
+    // 添加RGB LED 滚动效果的工具函数
+    mcp_server.AddTool("self.light.scroll",
+                       "创建 LED 灯珠的滚动效果，从低亮色到高亮色交替显示，适用于动态展示效果。",
+                       PropertyList({Property("low_red", kPropertyTypeInteger, 0, 255),
+                                     Property("low_green", kPropertyTypeInteger, 0, 255),
+                                     Property("low_blue", kPropertyTypeInteger, 0, 255),
+                                     Property("high_red", kPropertyTypeInteger, 0, 255),
+                                     Property("high_green", kPropertyTypeInteger, 0, 255),
+                                     Property("high_blue", kPropertyTypeInteger, 0, 255),
+                                     Property("length", kPropertyTypeInteger, 4, 1, 8),
+                                     Property("interval_ms", kPropertyTypeInteger, 100, 50, 1000)}),
+                       [&led_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           int low_red = properties["low_red"].value<int>();
+                           int low_green = properties["low_green"].value<int>();
+                           int low_blue = properties["low_blue"].value<int>();
+                           int high_red = properties["high_red"].value<int>();
+                           int high_green = properties["high_green"].value<int>();
+                           int high_blue = properties["high_blue"].value<int>();
+                           int length = properties["length"].value<int>();
+                           int interval_ms = properties["interval_ms"].value<int>();
+
+                           StripColor low = {static_cast<uint8_t>(low_red),
+                                             static_cast<uint8_t>(low_green),
+                                             static_cast<uint8_t>(low_blue)};
+                           StripColor high = {static_cast<uint8_t>(high_red),
+                                              static_cast<uint8_t>(high_green),
+                                              static_cast<uint8_t>(high_blue)};
+
+                           led_controller.GetRgbLedStrip()->Scroll(low, high, length, interval_ms);
+                           ESP_LOGI(TAG, "RGB LED scroll started - Low: (%d,%d,%d), High: (%d,%d,%d), Length: %d, Interval: %dms",
+                                    low_red, low_green, low_blue,
+                                    high_red, high_green, high_blue,
+                                    length, interval_ms);
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"low_color\":{"
+                                                  "\"r\":" +
+                                                  std::to_string(low_red) +
+                                                  ",\"g\":" + std::to_string(low_green) +
+                                                  ",\"b\":" + std::to_string(low_blue) + "},"
+                                                                                         ",\"high_color\":{"
+                                                                                         "\"r\":" +
+                                                  std::to_string(high_red) +
+                                                  ",\"g\":" + std::to_string(high_green) +
+                                                  ",\"b\":" + std::to_string(high_blue) + "},"
+                                                                                          ",\"length\":" +
+                                                  std::to_string(length) +
+                                                  ",\"interval_ms\":" + std::to_string(interval_ms) + "}";
+                           return response;
+                       });
+
+    // 添加RGB LED 呼吸效果的工具函数
+    mcp_server.AddTool("self.light.breathe",
+                       "让所有 LED 灯珠执行呼吸效果，亮度从 0 逐渐增强到当前颜色再减弱到 0，循环往复。",
+                       PropertyList({Property("breath_time_ms", kPropertyTypeInteger, 2000, 500, 10000)}),
+                       [&led_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           int breath_time_ms = properties["breath_time_ms"].value<int>();
+
+                           led_controller.GetRgbLedStrip()->StartBreathe(breath_time_ms);
+                           ESP_LOGI(TAG, "RGB LED breathe effect started - Duration: %dms", breath_time_ms);
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"breath_time_ms\":" +
+                                                  std::to_string(breath_time_ms) + "}";
+                           return response;
+                       });
+
+    // 添加RGB LED 开灯效果的工具函数
+    mcp_server.AddTool("self.light.turn_on",
+                       "执行开灯动画效果，LED 灯珠依次点亮，最终达到目标颜色。",
+                       PropertyList({Property("total_time_ms", kPropertyTypeInteger, 1000, 200, 5000),
+                                     Property("red", kPropertyTypeInteger, 0, 255),
+                                     Property("green", kPropertyTypeInteger, 0, 255),
+                                     Property("blue", kPropertyTypeInteger, 0, 255)}),
+                       [&led_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           int total_time_ms = properties["total_time_ms"].value<int>();
+                           int red = properties["red"].value<int>();
+                           int green = properties["green"].value<int>();
+                           int blue = properties["blue"].value<int>();
+
+                           StripColor color = {static_cast<uint8_t>(red),
+                                               static_cast<uint8_t>(green),
+                                               static_cast<uint8_t>(blue)};
+
+                           led_controller.GetRgbLedStrip()->TurnOnStrip(total_time_ms, color);
+                           ESP_LOGI(TAG, "RGB LED turn-on sequence started - Time: %dms, Color: R:%d, G:%d, B:%d",
+                                    total_time_ms, red, green, blue);
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"total_time_ms\":" +
+                                                  std::to_string(total_time_ms) +
+                                                  ",\"red\":" + std::to_string(red) +
+                                                  ",\"green\":" + std::to_string(green) +
+                                                  ",\"blue\":" + std::to_string(blue) + "}";
+                           return response;
+                       });
+
+    // 添加RGB LED 关灯效果的工具函数
+    mcp_server.AddTool("self.light.turn_off",
+                       "执行关灯动画效果，LED 灯珠亮度逐渐减弱直至完全熄灭。",
+                       PropertyList({Property("fade_time_ms", kPropertyTypeInteger, 1000, 200, 5000)}),
+                       [&led_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           int fade_time_ms = properties["fade_time_ms"].value<int>();
+
+                           led_controller.GetRgbLedStrip()->TurnOffStrip(fade_time_ms);
+                           ESP_LOGI(TAG, "RGB LED turn-off sequence started - Fade time: %dms", fade_time_ms);
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"fade_time_ms\":" +
+                                                  std::to_string(fade_time_ms) + "}";
+                           return response;
+                       });
+
+    // 添加RGB LED 增加亮度的工具函数
+    mcp_server.AddTool("self.light.increase_brightness",
+                       "增加 LED 亮度等级，共 6 个等级（0-5），每次增加一级。",
                        PropertyList(),
                        [&led_controller](const PropertyList &properties) -> ReturnValue
                        {
-                           led_controller.SetRainbowColor();
+                           led_controller.GetRgbLedStrip()->IncreaseBrightness();
+                           ESP_LOGI(TAG, "RGB LED brightness increased");
 
-                           ESP_LOGI(TAG, "RGB LED rainbow color effect set");
+                           std::string response = "{\"success\":true}";
+                           return response;
+                       });
 
-                           std::string response = "{\"success\":true"
-                                                  ",\"effect\":\"rainbow\"}";
+    // 添加RGB LED 降低亮度的工具函数
+    mcp_server.AddTool("self.light.decrease_brightness",
+                       "降低 LED 亮度等级，共 6 个等级（0-5），每次降低一级。",
+                       PropertyList(),
+                       [&led_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           led_controller.GetRgbLedStrip()->DecreaseBrightness();
+                           ESP_LOGI(TAG, "RGB LED brightness decreased");
+
+                           std::string response = "{\"success\":true}";
                            return response;
                        });
 }
-
+/*
 void InitializeMotorMCP(
     McpServer &mcp_server,
     FogSeekMotorController &motor_controller)
@@ -510,5 +524,4 @@ void InitializeLightPanelMCP(
                                                   ",\"state\":" +
                                                   std::string(state ? "true" : "false") + "}";
                            return response;
-                       });
-}
+                       });*/

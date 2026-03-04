@@ -3,7 +3,6 @@
 
 #include <driver/gpio.h>
 #include <esp_timer.h>
-
 #include "device_state.h"
 #include "led/gpio_led.h"
 #include "led/led.h"
@@ -11,15 +10,17 @@
 #include "led/circular_strip.h"
 
 #include <memory>
+#include <mutex>
 
-// LED引脚配置结构体
+// LED 引脚配置结构体
 typedef struct
 {
-    int red_gpio;             // 红色LED GPIO引脚
-    int green_gpio;           // 绿色LED GPIO引脚
-    int rgb_gpio = -1;        // RGB灯带GPIO，默认为-1表示不使用
-    int cold_light_gpio = -1; // 冷色灯GPIO，默认为-1表示不使用
-    int warm_light_gpio = -1; // 暖色灯GPIO，默认为-1表示不使用
+    int red_gpio;             // 红色 LED GPIO 引脚
+    int green_gpio;           // 绿色 LED GPIO 引脚
+    int rgb_gpio = -1;        // RGB 灯带 GPIO，默认为 -1 表示不使用
+    int rgb_num_leds = 0;     // RGB 灯带 LED 数量，默认为 0
+    int cold_light_gpio = -1; // 冷色灯 GPIO，默认为 -1 表示不使用
+    int warm_light_gpio = -1; // 暖色灯 GPIO，默认为 -1 表示不使用
 } led_pin_config_t;
 
 /**
@@ -65,37 +66,35 @@ private:
 };
 
 /**
- * @brief 扩展的RGB灯带类
- * 继承自CircularStrip
+ * @brief 扩展的 RGB 灯带类
+ * 继承自 CircularStrip，使用装饰器模式增强颜色管理功能
  */
-class RgbLedStrip : public CircularStrip // 改名
+class RgbLedStrip : public CircularStrip
 {
 public:
-    /**
-     * @brief 构造函数
-     * @param gpio GPIO引脚号
-     * @param num_leds LED数量
-     */
     RgbLedStrip(gpio_num_t gpio, uint8_t num_leds);
 
-    // 基础控制方法
-    void SetColor(uint8_t r, uint8_t g, uint8_t b);
-    void SetSingle(uint8_t index, uint8_t r, uint8_t g, uint8_t b);
-    void SetMultiple(const std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t>> &configs);
+    // 装饰器模式方法并记录当前颜色
+    void SetAllColor(StripColor color);
+    void SetSingleColor(uint8_t index, StripColor color);
+    void Blink(StripColor color, int interval_ms);
+    void Scroll(StripColor low, StripColor high, int length, int interval_ms);
 
-    // 状态管理
-    void SetBackground(uint8_t r, uint8_t g, uint8_t b);
-    void ResetToBackground();
+    // 重写灯光特效
+    void StartBreathe(int breath_time_ms);                 // 呼吸效果
+    void TurnOnStrip(int total_time_ms, StripColor color); // 开灯效果
+    void TurnOffStrip(int total_time_ms);                  // 熄灯效果
 
-    // 查询接口
-    StripColor GetCurrentColor() const { return current_color_; }
-    StripColor GetBackground() const { return background_color_; }
+    // 亮度等级控制
+    void IncreaseBrightness();
+    void DecreaseBrightness();
 
 private:
-    uint8_t num_leds_;
-    StripColor current_color_ = {255, 255, 255};
-    StripColor background_color_ = {0, 0, 0};
-    std::vector<StripColor> led_cache_;
+    static const char *TAG;
+    StripColor current_color_ = {255, 0, 0}; // 原始颜色（不受亮度影响）
+    uint8_t num_leds_ = 0;
+    uint8_t brightness_level_ = 3;
+    void ApplyBrightness();
 };
 
 // 用于区分不同效果的枚举 - 需要在类外部声明以供内部使用
@@ -109,10 +108,10 @@ enum EffectType
 };
 
 /**
- * @brief 雾岸设备LED控制器类
+ * @brief 雾岸设备 LED 控制器类
  *
- * 该类是LED系统的主控制器，负责管理红绿灯和其他LED设备。
- * 内部使用RedLed和GreenLed类分别控制红灯和绿灯，这些是
+ * 该类是 LED 系统的主控制器，负责管理红绿灯和其他 LED 设备。
+ * 内部使用 RedLed 和 GreenLed 类分别控制红灯和绿灯，这些是
  * 内部实现细节，外部代码应通过本类的公共接口进行操作。
  */
 class FogSeekLedController
@@ -124,7 +123,7 @@ public:
     // 初始化LED GPIO
     void InitializeLeds(FogSeekPowerManager &power_manager, const led_pin_config_t *pin_config);
 
-    // 更新LED状态
+    // 更新 LED 状态
     void UpdateLedStatus(FogSeekPowerManager &power_manager);
 
     // 冷暖色灯控制
@@ -135,43 +134,22 @@ public:
     bool IsColdLightOn() const { return cold_light_state_; }
     bool IsWarmLightOn() const { return warm_light_state_; }
 
-    // RGB灯带控制方法
-    void SetRgbStrip(CircularStrip *strip, uint8_t num_leds); // 设置RGB灯带实例
-    bool RunMarqueeLights(int total_time_ms = 5000);          // 跑马灯效果，total_time_ms毫秒内依次点亮所有灯，原PowerOnSequence函数改名
-    bool TurnOnRgbLights(int duration_ms = 1000);             // 打开所有灯光，duration_ms时间内从暗到亮
-    bool TurnOffRgbLights(int duration_ms = 1000);            // 关闭所有灯光，duration_ms时间内从亮到暗
-    void IncreaseBrightness();                                // 增加亮度一个档位
-    void DecreaseBrightness();                                // 降低亮度一个档位
-    void ChangeToRandomColors();                              // 随机变化颜色（红橙黄绿青蓝紫）
-    bool StartBreathingEffect(int cycle_duration_ms = 4000);  // 开始呼吸效果，cycle_duration_ms为一个完整周期的时间
-    void StopBreathingEffect();                               // 停止呼吸效果
+    // RGB 灯带控制
+    RgbLedStrip *GetRgbLedStrip() const { return rgb_led_strip_; }
+    uint8_t GetNumLeds() const { return num_leds_; }
 
-    // 自定义颜色控制方法
-    void SetCustomColor(uint8_t red, uint8_t green, uint8_t blue);                                            // 设置自定义颜色
-    void SetSingleLedColor(uint8_t led_index, uint8_t red, uint8_t green, uint8_t blue);                      // 设置单个LED的颜色
-    void SetRainbowColor();                                                                                   // 设置彩虹颜色，每个LED显示不同颜色
-    void SetMultipleLedColors(const std::vector<std::tuple<uint8_t, uint8_t, uint8_t, uint8_t>> &led_colors); // 设置多个LED的不同颜色 (index, r, g, b)
-
-    // 获取LED实例的方法
+    // 获取 LED 实例的方法
     RedLed *GetRedLed() const { return red_led_; }
     GreenLed *GetGreenLed() const { return green_led_; }
     GpioLed *GetColdLight() const { return cold_light_; }
     GpioLed *GetWarmLight() const { return warm_light_; }
-    CircularStrip *GetRgbStrip() const { return rgb_led_strip_; }
-
-    // 定时器状态查询
-    bool IsEffectRunning() const { return is_effect_running_; }
-    bool IsBreathingEffectActive() const { return current_effect_type_ == BREATHING_EFFECT; }
-
-    // 内部辅助函数（需要被静态回调函数访问）
-    void EffectTimerCallback(); // 效果定时器回调函数
 
 private:
     static const char *TAG; // 日志标签
 
-    // LED实例
-    RedLed *red_led_ = nullptr;     // 红色LED控制器实例
-    GreenLed *green_led_ = nullptr; // 绿色LED控制器实例
+    // LED 实例
+    RedLed *red_led_ = nullptr;     // 红色 LED 控制器实例
+    GreenLed *green_led_ = nullptr; // 绿色 LED 控制器实例
 
     // 冷暖色灯控制
     GpioLed *cold_light_ = nullptr; // 冷色灯控制器实例
@@ -179,33 +157,13 @@ private:
     bool cold_light_state_ = false; // 冷色灯当前状态
     bool warm_light_state_ = false; // 暖色灯当前状态
 
-    // RGB灯带控制
-    CircularStrip *rgb_led_strip_ = nullptr;               // RGB灯带控制器实例
-    uint8_t rgb_num_leds_ = 0;                             // RGB灯珠数量
-    uint8_t current_brightness_level_ = 2;                 // 当前亮度等级 (0-4)，默认为中间值
-    uint8_t brightness_levels_[5] = {10, 30, 50, 70, 100}; // 亮度等级对应的百分比
-    StripColor current_color_ = {255, 255, 255};           // 当前颜色，用于平滑过渡
-    StripColor original_color_ = {255, 255, 255};          // 原始颜色，用于亮度调节
+    // RGB 灯带控制
+    RgbLedStrip *rgb_led_strip_ = nullptr; // RGB 灯带控制器实例
+    uint8_t num_leds_ = 0;                 // RGB LED 数量
 
-    // 通用异步效果相关
-    esp_timer_handle_t effect_timer_ = nullptr;
-    bool is_effect_running_ = false;
+    led_pin_config_t pin_config_; // LED 引脚配置
 
-    // 通用效果参数
-    EffectType current_effect_type_ = NONE; // 当前效果类型
-    int effect_duration_ms_ = 0;            // 效果持续时间
-    int effect_delay_per_step_ = 0;         // 每步延迟时间
-    int effect_current_step_ = 0;           // 当前步骤
-    int effect_total_steps_ = 0;            // 总步骤数
-
-    // 呼吸效果专用参数
-    float breathing_direction_ = 1.0f; // 呼吸方向：1为增强，-1为减弱
-
-    led_pin_config_t pin_config_; // LED引脚配置
-
-    // 内部辅助函数
-    bool StartEffect(EffectType type, int duration_ms); // 启动通用效果
-    void StopCurrentEffect();                           // 停止当前效果
+    mutable std::mutex mutex_; // 保护 RGB 灯带操作的互斥锁
 };
 
 #endif
