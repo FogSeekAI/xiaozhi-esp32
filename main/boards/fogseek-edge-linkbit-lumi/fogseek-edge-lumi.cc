@@ -120,12 +120,9 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 // 设置初始颜色为蓝色
-                                 //  rgb_led_strip_->SetAllColor({0, 0, 100});
-                                 // 启动呼吸效果，周期 2000ms
                                  rgb_led_strip_->IncreaseBrightness();
-                                 //  auto &app = Application::GetInstance();
-                                 //  app.ToggleChatState(); // 切换聊天状态（打断）
+                                 auto &app = Application::GetInstance();
+                                 app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {

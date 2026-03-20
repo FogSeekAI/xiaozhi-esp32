@@ -698,6 +698,11 @@ elseif(CONFIG_BOARD_TYPE_FOGSEEK_EDGE_LINKBIT_LUMI)
     set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
     set(BUILTIN_ICON_FONT font_awesome_16_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_32)
+elseif(CONFIG_BOARD_TYPE_FOGSEEK_EDGE_ESP15F)
+    set(BOARD_TYPE "fogseek-edge-esp15f")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
+    set(BUILTIN_ICON_FONT font_awesome_16_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_32)
 endif()
 
 file(GLOB BOARD_SOURCES

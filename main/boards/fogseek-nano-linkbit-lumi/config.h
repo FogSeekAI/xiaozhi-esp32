@@ -18,7 +18,7 @@
 #define LED_RED_GPIO GPIO_NUM_48
 #define LED_GREEN_GPIO GPIO_NUM_47
 #define LED_RGB_GPIO GPIO_NUM_2 // RGB 灯带控制引脚
-#define LED_RGB_NUM_LEDS 8  // RGB 灯带 LED 数量
+#define LED_RGB_NUM_LEDS 8      // RGB 灯带 LED 数量
 
 // 音频相关配置
 #define AUDIO_INPUT_SAMPLE_RATE 24000

@@ -1,9 +1,8 @@
 #include "wifi_board.h"
 #include "config.h"
 #include "power_manager.h"
-#include "display_manager.h"
 #include "led_controller.h"
-#include "codecs/es8389_audio_codec.h"
+#include "codecs/box_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
@@ -13,28 +12,29 @@
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
-#include "mcp_tools.h"
+#include "uart_transport.h" // 新增：UART串口传输
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
+#include <driver/uart.h>
 
-#define TAG "FogSeekNanoLcd1_8"
+#define TAG "FogSeekEdgeEsp15F"
 
-class FogSeekNanoLcd1_8 : public WifiBoard
+class FogSeekEdgeEsp15F : public WifiBoard
 {
 private:
     Button boot_button_;
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
-    FogSeekDisplayManager display_manager_;
     FogSeekLedController led_controller_;
+    UartTransport uart_transport_; // 新增：UART串口传输实例
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
 
-    // 初始化I2C外设
+    // 初始化 I2C外设
     void InitializeI2c()
     {
         i2c_master_bus_config_t i2c_bus_cfg = {
@@ -72,31 +72,6 @@ private:
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
     }
 
-    // 初始化显示管理器
-    void InitializeDisplayManager()
-    {
-        lcd_pin_config_t lcd_pin_config = {
-            .io0_gpio = LCD_IO0_GPIO,
-            .io1_gpio = LCD_IO1_GPIO,
-            .scl_gpio = LCD_SCL_GPIO,
-            .io2_gpio = LCD_IO2_GPIO,
-            .io3_gpio = LCD_IO3_GPIO,
-            .cs_gpio = LCD_CS_GPIO,
-            .dc_gpio = LCD_DC_GPIO,
-            .reset_gpio = LCD_RESET_GPIO,
-            .im0_gpio = LCD_IM0_GPIO,
-            .im2_gpio = LCD_IM2_GPIO,
-            .bl_gpio = LCD_BL_GPIO,
-            .width = LCD_H_RES,
-            .height = LCD_V_RES,
-            .offset_x = DISPLAY_OFFSET_X,
-            .offset_y = DISPLAY_OFFSET_Y,
-            .mirror_x = DISPLAY_MIRROR_X,
-            .mirror_y = DISPLAY_MIRROR_Y,
-            .swap_xy = DISPLAY_SWAP_XY};
-        display_manager_.Initialize(BOARD_LCD_TYPE, &lcd_pin_config);
-    }
-
     // 初始化音频功放引脚并默认关闭功放
     void InitializeAudioAmplifier()
     {
@@ -122,7 +97,9 @@ private:
         ctrl_button_.OnClick([this]()
                              {
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                                 app.PlaySound(Lang::Sounds::OGG_WELCOME);
+                                 vTaskDelay(pdMS_TO_TICKS(1000)); // 延时500ms播放音效
+                                 app.ToggleChatState();           // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
@@ -140,6 +117,64 @@ private:
             } else {
                 PowerOff();
             } });
+    }
+
+    // 初始化 UART串口（用于ESP-15F透传模块）
+    void InitializeUart()
+    {
+        uart_transport_.In
+
+            itialize(UART_NUM_0, UART_TX_PIN, UART_RX_PIN, UART_BAUD_RATE);
+
+        // 发送欢迎消息
+        uart_transport_.SendDeviceState("initialized");
+        ESP_LOGI(TAG, "UART initialized for ESP-15F module");
+    }
+
+    // 拦截聊天消息并发送到 UART
+    void OnChatMessage(const char *role, const char *content)
+    {
+        if (!content || strlen(content) == 0)
+        {
+            return;
+        }
+
+        role_type_t role_type;
+        if (strcmp(role, "user") == 0)
+        {
+            role_type = ROLE_USER;
+        }
+        else if (strcmp(role, "assistant") == 0)
+        {
+            role_type = ROLE_ASSISTANT;
+        }
+        else
+        {
+            role_type = ROLE_SYSTEM;
+        }
+
+        ESP_LOGI(TAG, "Sending chat message via UART: role=%s, content=%s", role, content);
+        uart_transport_.SendChatMessage(role_type, std::string(content));
+    }
+
+    // 拦截情绪信息并发送到 UART
+    void OnEmotionChanged(const char *emotion)
+    {
+        if (!emotion || strlen(emotion) == 0)
+        {
+            return;
+        }
+
+        ESP_LOGI(TAG, "Sending emotion via UART: %s", emotion);
+        uart_transport_.SendEmotion(std::string(emotion));
+    }
+
+    // 处理设备状态变化
+    void OnDeviceStateChanged(DeviceState state)
+    {
+        const char *state_str = DeviceStateToString(state);
+        ESP_LOGI(TAG, "Sending device state via UART: %s", state_str);
+        uart_transport_.SendDeviceState(state_str);
     }
 
     // 处理自动唤醒逻辑
@@ -167,7 +202,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNanoLcd1_8 *>(arg);
+                auto instance = static_cast<FogSeekEdgeEsp15F *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -182,7 +217,6 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
-        display_manager_.SetBrightness(100);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
@@ -198,7 +232,6 @@ private:
     {
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-        display_manager_.SetBrightness(0);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
@@ -210,30 +243,24 @@ private:
     }
 
 public:
-    FogSeekNanoLcd1_8() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekEdgeEsp15F() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
-        InitializeDisplayManager();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
+        InitializeUart(); // 新增：初始化 UART串口
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
     }
 
-    virtual Display *GetDisplay() override
-    {
-        return display_manager_.GetDisplay();
-    }
-
     virtual AudioCodec *GetAudioCodec() override
     {
-        static Es8389AudioCodec audio_codec(
+        static BoxAudioCodec audio_codec(
             i2c_bus_,
-            (i2c_port_t)0,
             AUDIO_INPUT_SAMPLE_RATE,
             AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_GPIO_MCLK,
@@ -241,14 +268,42 @@ public:
             AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
-            GPIO_NUM_NC,
-            AUDIO_CODEC_ES8389_ADDR,
-            true,
-            true);
+            AUDIO_CODEC_PA_PIN,
+            AUDIO_CODEC_ES8311_ADDR,
+            AUDIO_CODEC_ES7210_ADDR,
+            AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
 
-    ~FogSeekNanoLcd1_8()
+    // 重写 Display相关方法以拦截消息
+    virtual void OnDisplayChatMessage(const char *role, const char *content) override
+    {
+        // 先调用父类方法确保正常显示
+        WifiBoard::OnDisplayChatMessage(role, content);
+
+        // 然后通过UART发送
+        OnChatMessage(role, content);
+    }
+
+    virtual void OnDisplayEmotion(const char *emotion) override
+    {
+        // 先调用父类方法确保正常显示
+        WifiBoard::OnDisplayEmotion(emotion);
+
+        // 然后通过UART发送
+        OnEmotionChanged(emotion);
+    }
+
+    virtual void OnDisplayStateChanged(DeviceState state) override
+    {
+        // 先调用父类方法确保正常显示
+        WifiBoard::OnDisplayStateChanged(state);
+
+        // 然后通过UART发送
+        OnDeviceStateChanged(state);
+    }
+
+    ~FogSeekEdgeEsp15F()
     {
         if (i2c_bus_)
         {
@@ -257,4 +312,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekNanoLcd1_8);
+DECLARE_BOARD(FogSeekEdgeEsp15F);

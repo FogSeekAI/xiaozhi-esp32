@@ -1,9 +1,8 @@
 #include "wifi_board.h"
 #include "config.h"
 #include "power_manager.h"
-#include "display_manager.h"
 #include "led_controller.h"
-#include "codecs/es8389_audio_codec.h"
+#include "codecs/box_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
 #include "button.h"
@@ -13,21 +12,19 @@
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
-#include "mcp_tools.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 
-#define TAG "FogSeekNanoLcd1_8"
+#define TAG "FogSeekEdgeV4_0"
 
-class FogSeekNanoLcd1_8 : public WifiBoard
+class FogSeekEdgeV4_0 : public WifiBoard
 {
 private:
     Button boot_button_;
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
-    FogSeekDisplayManager display_manager_;
     FogSeekLedController led_controller_;
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
@@ -72,31 +69,6 @@ private:
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
     }
 
-    // 初始化显示管理器
-    void InitializeDisplayManager()
-    {
-        lcd_pin_config_t lcd_pin_config = {
-            .io0_gpio = LCD_IO0_GPIO,
-            .io1_gpio = LCD_IO1_GPIO,
-            .scl_gpio = LCD_SCL_GPIO,
-            .io2_gpio = LCD_IO2_GPIO,
-            .io3_gpio = LCD_IO3_GPIO,
-            .cs_gpio = LCD_CS_GPIO,
-            .dc_gpio = LCD_DC_GPIO,
-            .reset_gpio = LCD_RESET_GPIO,
-            .im0_gpio = LCD_IM0_GPIO,
-            .im2_gpio = LCD_IM2_GPIO,
-            .bl_gpio = LCD_BL_GPIO,
-            .width = LCD_H_RES,
-            .height = LCD_V_RES,
-            .offset_x = DISPLAY_OFFSET_X,
-            .offset_y = DISPLAY_OFFSET_Y,
-            .mirror_x = DISPLAY_MIRROR_X,
-            .mirror_y = DISPLAY_MIRROR_Y,
-            .swap_xy = DISPLAY_SWAP_XY};
-        display_manager_.Initialize(BOARD_LCD_TYPE, &lcd_pin_config);
-    }
-
     // 初始化音频功放引脚并默认关闭功放
     void InitializeAudioAmplifier()
     {
@@ -122,7 +94,9 @@ private:
         ctrl_button_.OnClick([this]()
                              {
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                                 app.PlaySound(Lang::Sounds::OGG_WELCOME);
+                                 vTaskDelay(pdMS_TO_TICKS(1000)); // 延时500ms播放音效
+                                 app.ToggleChatState();           // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
@@ -167,7 +141,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNanoLcd1_8 *>(arg);
+                auto instance = static_cast<FogSeekEdgeV4_0 *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -182,7 +156,6 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
-        display_manager_.SetBrightness(100);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
@@ -198,7 +171,6 @@ private:
     {
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-        display_manager_.SetBrightness(0);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
@@ -210,12 +182,11 @@ private:
     }
 
 public:
-    FogSeekNanoLcd1_8() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekEdgeV4_0() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
-        InitializeDisplayManager();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
 
@@ -224,16 +195,10 @@ public:
                                              { led_controller_.UpdateLedStatus(power_manager_); });
     }
 
-    virtual Display *GetDisplay() override
-    {
-        return display_manager_.GetDisplay();
-    }
-
     virtual AudioCodec *GetAudioCodec() override
     {
-        static Es8389AudioCodec audio_codec(
+        static BoxAudioCodec audio_codec(
             i2c_bus_,
-            (i2c_port_t)0,
             AUDIO_INPUT_SAMPLE_RATE,
             AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_GPIO_MCLK,
@@ -241,14 +206,14 @@ public:
             AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
-            GPIO_NUM_NC,
-            AUDIO_CODEC_ES8389_ADDR,
-            true,
-            true);
+            AUDIO_CODEC_PA_PIN,
+            AUDIO_CODEC_ES8311_ADDR,
+            AUDIO_CODEC_ES7210_ADDR,
+            AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
 
-    ~FogSeekNanoLcd1_8()
+    ~FogSeekEdgeV4_0()
     {
         if (i2c_bus_)
         {
@@ -257,4 +222,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekNanoLcd1_8);
+DECLARE_BOARD(FogSeekEdgeV4_0);

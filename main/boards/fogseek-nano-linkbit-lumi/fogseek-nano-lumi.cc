@@ -29,7 +29,7 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-    CircularStrip *rgb_led_strip_ = nullptr;
+    RgbLedStrip *rgb_led_strip_ = nullptr;
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
@@ -120,19 +120,19 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 rgb_led_strip_->SetColor(255, 0, 0); // 红色
-                                 ESP_LOGI("RGB_TEST", "Test 1: Set all LEDs to RED");
+                                 rgb_led_strip_->IncreaseBrightness();
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
-                                       auto &app = Application::GetInstance();
-                                       if (app.GetDeviceState() == kDeviceStateStarting)
-                                       {
-                                           EnterWifiConfigMode();
-                                           return;
-                                       } });
+                                    rgb_led_strip_->DecreaseBrightness();
+                                    auto &app = Application::GetInstance();
+                                    if (app.GetDeviceState() == kDeviceStateStarting)
+                                    {
+                                        EnterWifiConfigMode();
+                                        return;
+                                    } });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -182,8 +182,10 @@ private:
     void PowerOn()
     {
         power_manager_.PowerOn();                        // 更新电源状态
-        led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
-        // led_controller_.RunMarqueeLights(5000);          // 跑马灯开机灯效
+        led_controller_.UpdateLedStatus(power_manager_); // 更新 LED 灯状态
+
+        // 执行开机灯光特效：在 2 秒内依次点亮所有 RGB 灯，颜色为蓝色
+        rgb_led_strip_->TurnOnStrip(5000, StripColor{0, 0, 100}); // 开机灯光特效,依次点亮所有 RGB 灯，颜色为蓝色
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
@@ -199,7 +201,7 @@ private:
     // 关机流程
     void PowerOff()
     {
-        // led_controller_.TurnOffRgbLights(500); // 关机灯效
+        rgb_led_strip_->TurnOffStrip(2000);  // 关机灯效
         SetExtensionPowerEnableState(false); // 关机时关闭扩展板电源使能
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
@@ -214,14 +216,14 @@ private:
     }
 
     // 初始化MCP工具
-    // void InitializeMCP()
-    // {
-    //     // 获取MCP服务器实例
-    //     auto &mcp_server = McpServer::GetInstance();
+    void InitializeMCP()
+    {
+        // 获取MCP服务器实例
+        auto &mcp_server = McpServer::GetInstance();
 
-    //     // 初始化RGB LED特效 MCP 工具
-    //     InitializeRgbLedMCP(mcp_server, led_controller_);
-    // }
+        // 初始化RGB LED特效 MCP 工具
+        InitializeRgbLedMCP(mcp_server, led_controller_);
+    }
 
 public:
     FogSeekNanoLinkBitLumi() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
@@ -232,7 +234,7 @@ public:
         InitializeAudioAmplifier();
         InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
-        // InitializeMCP();
+        InitializeMCP();
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)

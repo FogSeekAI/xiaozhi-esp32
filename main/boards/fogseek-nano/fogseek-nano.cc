@@ -155,9 +155,9 @@ private:
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(70); // 开机后将音量设置为默认值
-        SetAudioAmplifierState(true);
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(70); // 开机后将音量设置为默认值
+        // SetAudioAmplifierState(true);
 
         ESP_LOGI(TAG, "Device powered on.");
 
@@ -170,9 +170,9 @@ private:
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0); // 关机后将音量设置为默0
-        SetAudioAmplifierState(false);
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(0); // 关机后将音量设置为默0
+        // SetAudioAmplifierState(false);
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
 
@@ -210,6 +210,10 @@ public:
             true,
             true);
         return &audio_codec;
+    }
+    virtual Led *GetLed() override
+    {
+        return led_controller_.GetGreenLed();
     }
 
     ~FogSeekNano()
