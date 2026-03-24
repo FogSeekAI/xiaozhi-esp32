@@ -4,8 +4,6 @@
         {
             "name": "fogseek-nano-linkbit-lumi",
             "sdkconfig_append": [
-                "CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y",
-                "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions/v2/8m.csv\"",
                 "CONFIG_USE_DEVICE_AEC=y",
                 "CONFIG_USE_CUSTOM_WAKE_WORD=y",
                 "CONFIG_SR_MN_CN_MULTINET7_QUANT=y",

@@ -17,9 +17,9 @@
 #include <driver/rtc_io.h>
 #include <wifi_manager.h>
 
-#define TAG "FogSeekAudioAiya"
+#define TAG "AudioXiaoYa"
 
-class FogSeekAudioAiya : public WifiBoard
+class AudioXiaoYa : public WifiBoard
 {
 private:
     Button boot_button_;
@@ -132,7 +132,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekAudioAiya *>(arg);
+                auto instance = static_cast<AudioXiaoYa *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -175,7 +175,7 @@ private:
     }
 
 public:
-    FogSeekAudioAiya() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    AudioXiaoYa() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializePowerManager();
         InitializeLedController();
@@ -236,9 +236,9 @@ public:
         TryWifiConnect();
     }
 
-    ~FogSeekAudioAiya()
+    ~AudioXiaoYa()
     {
     }
 };
 
-DECLARE_BOARD(FogSeekAudioAiya);
+DECLARE_BOARD(AudioXiaoYa);

@@ -2,7 +2,7 @@
 #include "config.h"
 #include "power_manager.h"
 #include "led_controller.h"
-#include "servo_controller.h"
+#include "motor_controller.h"
 #include "codecs/es8389_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
@@ -29,7 +29,7 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-    FogSeekServoController servo_controller_;
+    FogSeekMotorController servo_controller_;
     CircularStrip *rgb_led_strip_ = nullptr;
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
@@ -64,23 +64,25 @@ private:
         power_manager_.Initialize(&power_pin_config);
     }
 
-    // 初始化LED控制器
+    // 初始化LED 控制器
     void InitializeLedController()
     {
         led_pin_config_t led_pin_config = {
             .red_gpio = LED_RED_GPIO,
-            .green_gpio = LED_GREEN_GPIO};
+            .green_gpio = LED_GREEN_GPIO,
+            .rgb_gpio = LED_RGB_GPIO,
+            .rgb_num_leds = LED_RGB_NUM_LEDS};
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
 
-        // 初始化RGB灯带
-        rgb_led_strip_ = new CircularStrip((gpio_num_t)LED_RGB_GPIO, 8);
+        // 从 LED 控制器获取 RGB 灯带实例
+        rgb_led_strip_ = led_controller_.GetRgbLedStrip();
     }
 
     // 初始化舵机控制器
     void InitializeServoController()
     {
         // 使用配置文件中定义的舵机控制引脚 (GPIO_NUM_5)
-        servo_controller_.Initialize(SERVO_BODY_GPIO);
+        servo_controller_.InitializeServo(SERVO_BODY_GPIO);
 
         // 设置舵机初始位置
         servo_controller_.SetAngle(90); // 90度位置（中间）

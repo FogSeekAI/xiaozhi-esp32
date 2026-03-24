@@ -1,6 +1,6 @@
 ## 产品简介
 
-雾岸科技 MoodLight 是一款智能氛围灯，具有以下特点：
+雾岸科技 MistLight 是一款智能氛围灯，具有以下特点：
 
 ## 主要功能
 
@@ -35,7 +35,7 @@
 推荐使用以下命令一键构建固件，该方式会自动应用所有板子特定配置：
 
 ```bash
-python scripts/release.py fogseek-audio-moodlight
+python scripts/release.py fogseek-audio-MistLight
 ```
 
 此命令会自动完成以下操作：
@@ -64,7 +64,7 @@ idf.py menuconfig
 
 3. **在 menuconfig 中选择：**
 ```
-Xiaozhi Assistant -> Board Type -> 雾岸科技 MoodLight
+Xiaozhi Assistant -> Board Type -> 雾岸科技 MistLight
 ```
 
 4. **编译：**

@@ -19,7 +19,7 @@
 
 #define TAG "FogSeekNano"
 
-class FogeSeekNano : public WifiBoard
+class FogSeekNano : public WifiBoard
 {
 private:
     Button boot_button_;
@@ -139,7 +139,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogeSeekNano *>(arg);
+                auto instance = static_cast<FogSeekNano *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -155,9 +155,9 @@ private:
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(70); // 开机后将音量设置为默认值
-        SetAudioAmplifierState(true);
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(70); // 开机后将音量设置为默认值
+        // SetAudioAmplifierState(true);
 
         ESP_LOGI(TAG, "Device powered on.");
 
@@ -170,9 +170,9 @@ private:
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0); // 关机后将音量设置为默0
-        SetAudioAmplifierState(false);
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(0); // 关机后将音量设置为默0
+        // SetAudioAmplifierState(false);
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
 
@@ -180,7 +180,7 @@ private:
     }
 
 public:
-    FogeSeekNano() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekNano() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
@@ -211,8 +211,12 @@ public:
             true);
         return &audio_codec;
     }
+    virtual Led *GetLed() override
+    {
+        return led_controller_.GetGreenLed();
+    }
 
-    ~FogeSeekNano()
+    ~FogSeekNano()
     {
         if (i2c_bus_)
         {
@@ -221,4 +225,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogeSeekNano);
+DECLARE_BOARD(FogSeekNano);

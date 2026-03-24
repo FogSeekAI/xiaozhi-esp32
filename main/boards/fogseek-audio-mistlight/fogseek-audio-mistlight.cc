@@ -2,6 +2,8 @@
 #include "config.h"
 #include "power_manager.h"
 #include "led_controller.h"
+#include "motor_controller.h"
+#include "fragrance_controller.h" // 添加香氛控制器头文件
 #include "codecs/no_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
@@ -17,6 +19,7 @@
 #include "device_state_machine.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
+#include <random>
 
 #define TAG "FogSeekAudioMistLight"
 
@@ -27,6 +30,8 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
+    FogSeekMotorController motor_controller_;                                      // 添加电机控制器
+    FragranceController fragrance_controller_{led_controller_, motor_controller_}; // 香氛控制器
     CircularStrip *rgb_led_strip_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
@@ -44,30 +49,25 @@ private:
         power_manager_.Initialize(&power_pin_config);
     }
 
-    // 初始化LED控制器
+    // 初始化LED 控制器
     void InitializeLedController()
     {
         led_pin_config_t led_pin_config = {
             .red_gpio = LED_RED_GPIO,
-            .green_gpio = LED_GREEN_GPIO};
+            .green_gpio = LED_GREEN_GPIO,
+            .rgb_gpio = LED_RGB_GPIO,
+            .rgb_num_leds = LED_RGB_NUM_LEDS};
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
 
-        // 初始化RGB灯带
-        rgb_led_strip_ = new CircularStrip((gpio_num_t)LED_RGB_GPIO, 16);
+        // 从 LED 控制器获取 RGB 灯带实例
+        rgb_led_strip_ = led_controller_.GetRgbLedStrip();
     }
 
-    // 初始化额外的GPIO控制引脚
+    // 初始化香氛电机控制引脚
     void InitializeGpioControls()
     {
-        gpio_config_t io_conf_led1 = {};
-        io_conf_led1.intr_type = GPIO_INTR_DISABLE;
-        io_conf_led1.mode = GPIO_MODE_OUTPUT;
-        io_conf_led1.pin_bit_mask = (1ULL << MOTOR_GPIO);
-        io_conf_led1.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf_led1.pull_up_en = GPIO_PULLUP_DISABLE;
-        gpio_config(&io_conf_led1);
-
-        gpio_set_level(MOTOR_GPIO, 0);
+        // 初始化电机控制器
+        motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
 
         ESP_LOGI(TAG, "GPIO controls initialized: MOTOR=%d", MOTOR_GPIO);
     }
@@ -76,67 +76,44 @@ private:
     void ToggleMotor()
     {
         motor_state_ = !motor_state_;
-        gpio_set_level(MOTOR_GPIO, motor_state_);
+        motor_controller_.ControlMotor(motor_state_);
         ESP_LOGI(TAG, "MOTOR state changed to: %s", motor_state_ ? "HIGH" : "LOW");
     }
 
-    // 初始化音频输出控制
-    void InitializeAudioOutputControl()
+    // 运行电机定时功能，例如每分钟运行10秒
+    void RunMotorTimed(uint32_t run_time_ms)
     {
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0); // 功放不支持使能控制，通过设置音量来替代使能，避免USB插入时自动播放声音
+        motor_controller_.RunMotorTimed(run_time_ms);
+        ESP_LOGI(TAG, "MOTOR scheduled: run for %d ms", run_time_ms);
     }
+
+    // 初始化音频输出控制
+    // void InitializeAudioOutputControl()
+    // {
+    //     auto codec = GetAudioCodec();
+    //     codec->SetOutputVolume(0); // 功放不支持使能控制，通过设置音量来替代使能，避免USB插入时自动播放声音
+    // }
 
     // 初始化按键回调
     void InitializeButtonCallbacks()
     {
+
         ctrl_button_.OnClick([this]()
                              {
-                                 motor_state_ = !motor_state_;
-
-                                 gpio_set_level(MOTOR_GPIO, motor_state_);
-                                 ESP_LOGI(TAG, "LED1 state changed to: %s", motor_state_ ? "HIGH" : "LOW");
-
-                                 // 循环切换RGB灯带颜色
-                                 static int color_index = 0;
-                                 switch (color_index)
-                                 {
-                                 case 0:
-                                     rgb_led_strip_->SetAllColor({255, 0, 255}); // 紫色
-                                     break;
-                                 case 1:
-                                     rgb_led_strip_->SetAllColor({0, 255, 0}); // 绿色
-                                     break;
-                                 case 2:
-                                     rgb_led_strip_->SetAllColor({255, 255, 0}); // 黄色
-                                     break;
-                                 case 3:
-                                     rgb_led_strip_->SetAllColor({0, 0, 255}); // 蓝色
-                                     break;
-                                 case 4:
-                                     rgb_led_strip_->SetAllColor({255, 165, 0}); // 橙色
-                                     break;
-                                 case 5:
-                                     rgb_led_strip_->SetAllColor({0, 255, 255}); // 青色
-                                     break;
-                                 default:
-                                     rgb_led_strip_->SetAllColor({255, 255, 255}); // 白色
-                                     break;
-                                 }
-                                 color_index = (color_index + 1) % 7; // 循环使用7种颜色
-
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); // 切换聊天状态（打断）
-                             });
+                                 app.ToggleChatState();                  // 切换聊天状态（打断）
+                                 led_controller_.ChangeToRandomColors(); // 切换灯光颜色
+                                 motor_controller_.ControlMotor(true); });
         ctrl_button_.OnDoubleClick([this]()
                                    {
-                                    rgb_led_strip_->SetAllColor({0, 0, 0}); // 白色
-            auto &app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting)
-            {
-                EnterWifiConfigMode();
-                return;
-            } });
+                                       auto &app = Application::GetInstance();
+                                       if (app.GetDeviceState() == kDeviceStateStarting)
+                                       {
+                                           EnterWifiConfigMode();
+                                           return;
+                                       }
+                                       led_controller_.TurnOffRgbLights(); // 关闭灯光
+                                       motor_controller_.ControlMotor(false); });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -187,9 +164,10 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
+        led_controller_.RunMarqueeLights(5000);          // 跑马灯开机灯效
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(70); // 开机后将音量设置为默认值
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(70); // 开机后将音量设置为默认值
 
         ESP_LOGI(TAG, "Device powered on.");
 
@@ -199,12 +177,12 @@ private:
     // 关机流程
     void PowerOff()
     {
+        led_controller_.TurnOffRgbLights(500); // 关机灯效
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-        rgb_led_strip_->SetAllColor({0, 0, 0}); // 白色
 
-        auto codec = GetAudioCodec();
-        codec->SetOutputVolume(0); // 关机后将音量设置为默0
+        // auto codec = GetAudioCodec();
+        // codec->SetOutputVolume(0); // 关机后将音量设置为默0
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
 
@@ -217,8 +195,14 @@ private:
         // 获取MCP服务器实例
         auto &mcp_server = McpServer::GetInstance();
 
-        // 初始化RGB LED MCP 工具
-        InitializeRgbLedMCP(mcp_server, rgb_led_strip_);
+        // 初始化RGB LED特效 MCP 工具
+        InitializeRgbLedMCP(mcp_server, led_controller_);
+
+        // 初始化电机 MCP 工具
+        InitializeMotorMCP(mcp_server, motor_controller_);
+
+        // 初始化香氛控制相关的MCP工具
+        InitializeFragranceMCP(mcp_server, fragrance_controller_);
     }
 
 public:
@@ -226,7 +210,7 @@ public:
     {
         InitializePowerManager();
         InitializeLedController();
-        InitializeAudioOutputControl();
+        // InitializeAudioOutputControl();
         InitializeGpioControls();
         InitializeButtonCallbacks();
         InitializeMCP();
