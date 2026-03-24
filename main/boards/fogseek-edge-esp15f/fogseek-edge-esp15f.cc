@@ -119,64 +119,6 @@ private:
             } });
     }
 
-    // 初始化 UART串口（用于ESP-15F透传模块）
-    void InitializeUart()
-    {
-        uart_transport_.In
-
-            itialize(UART_NUM_0, UART_TX_PIN, UART_RX_PIN, UART_BAUD_RATE);
-
-        // 发送欢迎消息
-        uart_transport_.SendDeviceState("initialized");
-        ESP_LOGI(TAG, "UART initialized for ESP-15F module");
-    }
-
-    // 拦截聊天消息并发送到 UART
-    void OnChatMessage(const char *role, const char *content)
-    {
-        if (!content || strlen(content) == 0)
-        {
-            return;
-        }
-
-        role_type_t role_type;
-        if (strcmp(role, "user") == 0)
-        {
-            role_type = ROLE_USER;
-        }
-        else if (strcmp(role, "assistant") == 0)
-        {
-            role_type = ROLE_ASSISTANT;
-        }
-        else
-        {
-            role_type = ROLE_SYSTEM;
-        }
-
-        ESP_LOGI(TAG, "Sending chat message via UART: role=%s, content=%s", role, content);
-        uart_transport_.SendChatMessage(role_type, std::string(content));
-    }
-
-    // 拦截情绪信息并发送到 UART
-    void OnEmotionChanged(const char *emotion)
-    {
-        if (!emotion || strlen(emotion) == 0)
-        {
-            return;
-        }
-
-        ESP_LOGI(TAG, "Sending emotion via UART: %s", emotion);
-        uart_transport_.SendEmotion(std::string(emotion));
-    }
-
-    // 处理设备状态变化
-    void OnDeviceStateChanged(DeviceState state)
-    {
-        const char *state_str = DeviceStateToString(state);
-        ESP_LOGI(TAG, "Sending device state via UART: %s", state_str);
-        uart_transport_.SendDeviceState(state_str);
-    }
-
     // 处理自动唤醒逻辑
     void HandleAutoWake()
     {
@@ -250,7 +192,7 @@ public:
         InitializeLedController();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
-        InitializeUart(); // 新增：初始化 UART串口
+      
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
@@ -275,33 +217,26 @@ public:
         return &audio_codec;
     }
 
+    const char *DeviceStateToString(DeviceState state)
+{
+    switch (state)
+    {
+    case DeviceState::kDeviceStateIdle:
+        return "idle";
+    case DeviceState::kDeviceStateStarting:
+        return "starting";
+    case DeviceState::kDeviceStateListening:
+        return "listening";
+    case DeviceState::kDeviceStateSpeaking:
+        return "speaking";
+    case DeviceState::kDeviceStateUpgrading:
+        return "upgrading";
+    default:
+        return "unknown";
+    }
+}
+
     // 重写 Display相关方法以拦截消息
-    virtual void OnDisplayChatMessage(const char *role, const char *content) override
-    {
-        // 先调用父类方法确保正常显示
-        WifiBoard::OnDisplayChatMessage(role, content);
-
-        // 然后通过UART发送
-        OnChatMessage(role, content);
-    }
-
-    virtual void OnDisplayEmotion(const char *emotion) override
-    {
-        // 先调用父类方法确保正常显示
-        WifiBoard::OnDisplayEmotion(emotion);
-
-        // 然后通过UART发送
-        OnEmotionChanged(emotion);
-    }
-
-    virtual void OnDisplayStateChanged(DeviceState state) override
-    {
-        // 先调用父类方法确保正常显示
-        WifiBoard::OnDisplayStateChanged(state);
-
-        // 然后通过UART发送
-        OnDeviceStateChanged(state);
-    }
 
     ~FogSeekEdgeEsp15F()
     {

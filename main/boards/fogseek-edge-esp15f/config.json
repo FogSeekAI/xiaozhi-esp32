@@ -2,7 +2,7 @@
     "target": "esp32s3",
     "builds": [
         {
-            "name": "fogseek-edge",
+            "name": "fogseek-edge-esp15f",
             "sdkconfig_append": [
                 "CONFIG_USE_DEVICE_AEC=y",
                 "CONFIG_SR_WN_WN9_HAIXIAOWU_TTS=y"
