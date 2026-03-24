@@ -177,59 +177,56 @@ private:
         }
     }
 
-     // 初始化 UART串口（用于ESP-15F透传模块）
+    // 初始化 UART串口（用于ESP-15F透传模块）
 
     void InitializeUart()
     {
         ESP_LOGI(TAG, "Starting UART initialization...");
-        
+
         bool init_result = uart_transport_.Initialize(UART_NUM_1, UART_TX_PIN, UART_RX_PIN, 115200);
         ESP_LOGI(TAG, "UART init result: %s", init_result ? "SUCCESS" : "FAILED");
 
         vTaskDelay(pdMS_TO_TICKS(200));
-        
+
         ESP_LOGI(TAG, "Starting receive task...");
-        uart_transport_.StartReceiveTask([this](uint8_t msg_type, const std::string& content) {
-            HandleUartMessage(msg_type, content);
-        });
+        uart_transport_.StartReceiveTask([this](uint8_t msg_type, const std::string &content)
+                                         { HandleUartMessage(msg_type, content); });
     }
 
-
-    
     // 处理 UART 接收到的消息
-    void HandleUartMessage(uint8_t msg_type, const std::string& content)
+    void HandleUartMessage(uint8_t msg_type, const std::string &content)
     {
         ESP_LOGI(TAG, "Received: Type=0x%02X, Content=\"%s\"", msg_type, content.c_str());
-        
+
         bool success = false;
-        
+
         switch (msg_type)
         {
-            case MSG_TYPE_EMOTION:
-                HandleEmotion(content);
-                success = true;
-                break;
-                
-            case MSG_TYPE_AUDIO_CONTROL:
-                success = HandleAudioControl(content);
-                break;
-                
-            case MSG_TYPE_VOLUME_CONTROL:
-                HandleVolumeControl(content);
-                success = true;
-                break;
-                
-            default:
-                ESP_LOGW(TAG, "Unknown message type: 0x%02X", msg_type);
-                uart_transport_.SendErrorResponse(ERROR_UNKNOWN_TYPE);
-                return;
+        case MSG_TYPE_EMOTION:
+            HandleEmotion(content);
+            success = true;
+            break;
+
+        case MSG_TYPE_AUDIO_CONTROL:
+            success = HandleAudioControl(content);
+            break;
+
+        case MSG_TYPE_VOLUME_CONTROL:
+            HandleVolumeControl(content);
+            success = true;
+            break;
+
+        default:
+            ESP_LOGW(TAG, "Unknown message type: 0x%02X", msg_type);
+            uart_transport_.SendErrorResponse(ERROR_UNKNOWN_TYPE);
+            return;
         }
-        
+
         // 发送 ACK 应答
         if (success)
         {
             uart_transport_.SendAckResponse(msg_type, ACK_RESULT_SUCCESS);
-            ESP_LOGD(TAG, "Sent ACK for message type 0x%02X", msg_type);
+            ESP_LOGI(TAG, "Sent ACK for message type 0x%02X", msg_type);
         }
         else
         {
@@ -238,37 +235,37 @@ private:
         }
     }
 
-    void HandleEmotion(const std::string& emotion)
+    void HandleEmotion(const std::string &emotion)
     {
         ESP_LOGI(TAG, "Emotion: %s", emotion.c_str());
         // 通过协议层发送文本消息给云端 AI
-        auto& app = Application::GetInstance();
+        auto &app = Application::GetInstance();
         app.WakeWordInvoke(emotion);
     }
 
     // 播放动物声音
-    void PlayAnimalSound(const std::string& animal_prefix)
+    void PlayAnimalSound(const std::string &animal_prefix)
     {
         // 根据动物类型选择并递增索引
         uint8_t sound_index;
         if (animal_prefix == "cat_voice")
         {
             cat_sound_index_ = (cat_sound_index_ % 7) + 1; // 1-7 循环
-            sound_index = cat_sound_index_ - 1; // 转换为 0-6 的索引
-            
+            sound_index = cat_sound_index_ - 1;            // 转换为 0-6 的索引
+
             ESP_LOGI(TAG, "Playing cat voice #%d", sound_index + 1);
-            
-            auto& app = Application::GetInstance();
+
+            auto &app = Application::GetInstance();
             app.PlaySound(CAT_VOICE_SOUNDS[sound_index]);
         }
         else if (animal_prefix == "dog_voice")
         {
             dog_sound_index_ = (dog_sound_index_ % 7) + 1; // 1-7 循环
-            sound_index = dog_sound_index_ - 1; // 转换为 0-6 的索引
-            
+            sound_index = dog_sound_index_ - 1;            // 转换为 0-6 的索引
+
             ESP_LOGI(TAG, "Playing dog voice #%d", sound_index + 1);
-            
-            auto& app = Application::GetInstance();
+
+            auto &app = Application::GetInstance();
             app.PlaySound(DOG_VOICE_SOUNDS[sound_index]);
         }
         else
@@ -277,11 +274,11 @@ private:
         }
     }
 
-     // 处理音频控制命令
-    bool HandleAudioControl(const std::string& animal)
+    // 处理音频控制命令
+    bool HandleAudioControl(const std::string &animal)
     {
         ESP_LOGI(TAG, "Received audio control command: %s", animal.c_str());
-        
+
         if (animal == "小猫" || animal == "cat")
         {
             ESP_LOGI(TAG, "Playing cat voice");
@@ -307,10 +304,12 @@ private:
         auto codec = GetAudioCodec();
         int current_volume = codec->output_volume();
         int new_volume = current_volume + delta;
-        
-        if (new_volume > 100) new_volume = 100;
-        else if (new_volume < 0) new_volume = 0;
-        
+
+        if (new_volume > 100)
+            new_volume = 100;
+        else if (new_volume < 0)
+            new_volume = 0;
+
         ESP_LOGI(TAG, "Adjusting volume from %d to %d", current_volume, new_volume);
         codec->SetOutputVolume(new_volume);
     }
@@ -319,16 +318,18 @@ private:
     void SetVolume(int volume)
     {
         auto codec = GetAudioCodec();
-        
-        if (volume > 100) volume = 100;
-        else if (volume < 0) volume = 0;
-        
+
+        if (volume > 100)
+            volume = 100;
+        else if (volume < 0)
+            volume = 0;
+
         ESP_LOGI(TAG, "Setting volume to %d", volume);
         codec->SetOutputVolume(volume);
     }
 
     // 处理音量控制命令
-    void HandleVolumeControl(const std::string& cmd)
+    void HandleVolumeControl(const std::string &cmd)
     {
         if (cmd == "增大" || cmd == "volume_up")
         {
@@ -387,7 +388,6 @@ public:
         // InitializeAudioAmplifier();
         InitializeButtonCallbacks();
         InitializeUart(); // 新增：初始化 UART
-
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)

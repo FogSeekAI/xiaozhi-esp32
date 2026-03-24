@@ -12,7 +12,6 @@
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
-#include "uart_transport.h" // 新增：UART串口传输
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
@@ -28,7 +27,6 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-    UartTransport uart_transport_; // 新增：UART串口传输实例
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
@@ -97,9 +95,7 @@ private:
         ctrl_button_.OnClick([this]()
                              {
                                  auto &app = Application::GetInstance();
-                                 app.PlaySound(Lang::Sounds::OGG_WELCOME);
-                                 vTaskDelay(pdMS_TO_TICKS(1000)); // 延时500ms播放音效
-                                 app.ToggleChatState();           // 切换聊天状态（打断）
+                                 app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
@@ -192,7 +188,6 @@ public:
         InitializeLedController();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
-      
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
@@ -216,27 +211,6 @@ public:
             AUDIO_INPUT_REFERENCE);
         return &audio_codec;
     }
-
-    const char *DeviceStateToString(DeviceState state)
-{
-    switch (state)
-    {
-    case DeviceState::kDeviceStateIdle:
-        return "idle";
-    case DeviceState::kDeviceStateStarting:
-        return "starting";
-    case DeviceState::kDeviceStateListening:
-        return "listening";
-    case DeviceState::kDeviceStateSpeaking:
-        return "speaking";
-    case DeviceState::kDeviceStateUpgrading:
-        return "upgrading";
-    default:
-        return "unknown";
-    }
-}
-
-    // 重写 Display相关方法以拦截消息
 
     ~FogSeekEdgeEsp15F()
     {
