@@ -86,11 +86,6 @@ private:
 
     uint8_t CalculateChecksum(const uint8_t* data, size_t length);
 
-    /**
-     * @brief 发送 ACK 应答帧
-     * @param content 应答内容
-     * @return 是否成功
-     */
     
 
 
@@ -162,4 +157,12 @@ public:
      * @return 发送的字节数
      */
     int SendRawData(const uint8_t* data, size_t length);
+
+    // AT 命令配置相关方法
+    bool SendATCommand(const std::string& cmd, std::string& response, uint32_t timeout_ms = 1000);
+    bool ConfigureWiFiModule();
+    bool ConnectToWiFi(const char* ssid, const char* password);
+    bool ConfigureMQTT(const char* client_id, const char* server_addr, int port);
+    bool TestMQTTConnection();
+    
 };

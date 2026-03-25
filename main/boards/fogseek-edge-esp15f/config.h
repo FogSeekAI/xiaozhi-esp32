@@ -41,4 +41,13 @@
 #define UART_RX_PIN GPIO_NUM_44 // UART RX 引脚
 #define UART_BAUD_RATE 115200   // 波特率
 
+// WiFi 配置
+#define WIFI_SSID "122320"
+#define WIFI_PASSWORD "12232000"
+
+// MQTT 配置
+#define MQTT_CLIENT_ID "ESP15F_Test_001"
+#define MQTT_SERVER_ADDR "8.138.244.44"  // 例如："192.168.1.100" 或域名
+#define MQTT_SERVER_PORT 1883
+
 #endif
