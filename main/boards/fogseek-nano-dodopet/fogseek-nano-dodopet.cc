@@ -122,7 +122,8 @@ private:
         ctrl_button_.OnClick([this]()
                              {
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                                 app.PlaySound(Lang::Sounds::OGG_CAT_VOICE01);
+                                 //  app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
