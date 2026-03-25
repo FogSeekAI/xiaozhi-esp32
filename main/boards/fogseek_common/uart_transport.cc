@@ -327,7 +327,7 @@ void UartTransport::SendErrorResponse(uint8_t error_code)
 }
 
 //---------------------------------------------------
-/* bool UartTransport::SendChatMessage(role_type_t role, const std::string &content)
+bool UartTransport::SendChatMessage(role_type_t role, const std::string& content)
 {
     if (!initialized_)
     {
@@ -340,27 +340,34 @@ void UartTransport::SendErrorResponse(uint8_t error_code)
     snprintf(payload, sizeof(payload), "{\"role\":%d,\"content\":\"%s\"}", role, content.c_str());
 
     size_t payload_len = strlen(payload);
-    uint8_t buffer[PROTOCOL_OVERHEAD + payload_len];
+    uint8_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
+    uint8_t buffer[frame_len];
+    size_t idx = 0;
 
-    // 填充帧头
-    buffer[0] = PROTOCOL_HEADER_1;
-    buffer[1] = PROTOCOL_HEADER_2;
-    // 消息类型
-    buffer[2] = MSG_TYPE_CHAT_MESSAGE;
-    // 数据长度（小端序）
-    buffer[3] = payload_len & 0xFF;
-    buffer[4] = (payload_len >> 8) & 0xFF;
-    // 复制 payload
-    memcpy(buffer + 5, payload, payload_len);
-    // 计算 CRC8
-    buffer[5 + payload_len] = CalculateCRC8(buffer, 5 + payload_len);
+    buffer[idx++] = PROTOCOL_HEADER_1;
+    buffer[idx++] = PROTOCOL_HEADER_2;
+    buffer[idx++] = MSG_TYPE_EMOTION;  // 使用 EMOTION 类型传输聊天消息
+    buffer[idx++] = payload_len & 0xFF;
+    buffer[idx++] = (payload_len >> 8) & 0xFF;
+    memcpy(buffer + idx, payload, payload_len);
+    idx += payload_len;
+
+    // 计算校验和
+    uint8_t checksum_data[3 + payload_len];
+    checksum_data[0] = buffer[2];
+    checksum_data[1] = buffer[3];
+    checksum_data[2] = buffer[4];
+    memcpy(checksum_data + 3, buffer + 5, payload_len);
+    buffer[idx++] = CalculateChecksum(checksum_data, 3 + payload_len);
+
+    buffer[idx++] = PROTOCOL_FOOTER_1;
+    buffer[idx++] = PROTOCOL_FOOTER_2;
 
     ESP_LOGD(TAG, "Sending chat message: role=%d, content=%s", role, content.c_str());
-    int sent = uart_write_bytes(uart_port_, buffer, sizeof(buffer));
-    return sent == sizeof(buffer);
-} */
+    return uart_write_bytes(uart_port_, buffer, frame_len) == frame_len;
+}
 
-/* bool UartTransport::SendEmotion(const std::string &emotion)
+bool UartTransport::SendEmotion(const std::string& emotion)
 {
     if (!initialized_)
     {
@@ -373,25 +380,32 @@ void UartTransport::SendErrorResponse(uint8_t error_code)
     snprintf(payload, sizeof(payload), "{\"emotion\":\"%s\"}", emotion.c_str());
 
     size_t payload_len = strlen(payload);
-    uint8_t buffer[PROTOCOL_OVERHEAD + payload_len];
+    uint8_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
+    uint8_t buffer[frame_len];
+    size_t idx = 0;
 
-    // 填充帧头
-    buffer[0] = PROTOCOL_HEADER_1;
-    buffer[1] = PROTOCOL_HEADER_2;
-    // 消息类型
-    buffer[2] = MSG_TYPE_EMOTION;
-    // 数据长度（小端序）
-    buffer[3] = payload_len & 0xFF;
-    buffer[4] = (payload_len >> 8) & 0xFF;
-    // 复制 payload
-    memcpy(buffer + 5, payload, payload_len);
-    // 计算 CRC8
-    buffer[5 + payload_len] = CalculateCRC8(buffer, 5 + payload_len);
+    buffer[idx++] = PROTOCOL_HEADER_1;
+    buffer[idx++] = PROTOCOL_HEADER_2;
+    buffer[idx++] = MSG_TYPE_EMOTION;
+    buffer[idx++] = payload_len & 0xFF;
+    buffer[idx++] = (payload_len >> 8) & 0xFF;
+    memcpy(buffer + idx, payload, payload_len);
+    idx += payload_len;
+
+    // 计算校验和
+    uint8_t checksum_data[3 + payload_len];
+    checksum_data[0] = buffer[2];
+    checksum_data[1] = buffer[3];
+    checksum_data[2] = buffer[4];
+    memcpy(checksum_data + 3, buffer + 5, payload_len);
+    buffer[idx++] = CalculateChecksum(checksum_data, 3 + payload_len);
+
+    buffer[idx++] = PROTOCOL_FOOTER_1;
+    buffer[idx++] = PROTOCOL_FOOTER_2;
 
     ESP_LOGD(TAG, "Sending emotion: %s", emotion.c_str());
-    int sent = uart_write_bytes(uart_port_, buffer, sizeof(buffer));
-    return sent == sizeof(buffer);
-} */
+    return uart_write_bytes(uart_port_, buffer, frame_len) == frame_len;
+}
 
 /* bool UartTransport::SendDeviceState(const std::string &state)
 {

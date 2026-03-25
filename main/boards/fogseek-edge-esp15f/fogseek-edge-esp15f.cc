@@ -27,6 +27,8 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
+    UartTransport uart_transport_;  // 添加 UART 传输实例
+
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
@@ -150,6 +152,15 @@ private:
         }
     }
 
+    //串口消息转发
+
+    // 初始化 UART 串口通信
+    void InitializeUartTransport()
+    {
+        uart_transport_.Initialize(UART_PORT, UART_TX_PIN, UART_RX_PIN, UART_BAUD_RATE);
+        ESP_LOGI(TAG, "UART transport initialized for WiFi module");
+    }
+
     // 开机流程
     void PowerOn()
     {
@@ -188,6 +199,8 @@ public:
         InitializeLedController();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
+        InitializeUartTransport();  // 初始化 UART
+
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
@@ -210,6 +223,25 @@ public:
             AUDIO_CODEC_ES7210_ADDR,
             AUDIO_INPUT_REFERENCE);
         return &audio_codec;
+    }
+
+    // 重写消息通知虚函数 - TTS 消息（AI 助手回复）
+    virtual void OnChatMessageReceived(const std::string& role, const std::string& content) override
+    {
+        if (role == "assistant") {
+            uart_transport_.SendChatMessage(ROLE_ASSISTANT, content);
+            ESP_LOGD(TAG, "Forwarded TTS message to WiFi module: %s", content.c_str());
+        } else if (role == "user") {
+            uart_transport_.SendChatMessage(ROLE_USER, content);
+            ESP_LOGD(TAG, "Forwarded STT message to WiFi module: %s", content.c_str());
+        }
+    }
+
+    // 重写消息通知虚函数 - LLM 情绪消息
+    virtual void OnEmotionReceived(const std::string& emotion) override
+    {
+        uart_transport_.SendEmotion(emotion);
+        ESP_LOGD(TAG, "Forwarded emotion to WiFi module: %s", emotion.c_str());
     }
 
     ~FogSeekEdgeEsp15F()
