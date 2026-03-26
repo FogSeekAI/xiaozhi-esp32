@@ -86,11 +86,6 @@ private:
 
     uint8_t CalculateChecksum(const uint8_t* data, size_t length);
 
-    /**
-     * @brief 发送 ACK 应答帧
-     * @param content 应答内容
-     * @return 是否成功
-     */
     
 
 
@@ -142,11 +137,30 @@ public:
     bool SendChatMessage(role_type_t role, const std::string& content);
 
     /**
+     * @brief 发送聊天消息到指定主题
+     * @param topic 发布主题
+     * @param role 消息角色（user/assistant/system）
+     * @param content 消息内容
+     * @return 是否成功
+     */
+    bool SendChatMessage(const char* topic, role_type_t role, const std::string& content);
+
+
+    /**
      * @brief 发送情绪信息
      * @param emotion 情绪字符串（如"happy", "sad", "neutral"等）
      * @return 是否成功
      */
     bool SendEmotion(const std::string& emotion);
+
+    /**
+     * @brief 发送情绪信息到指定主题
+     * @param topic 发布主题
+     * @param emotion 情绪字符串
+     * @return 是否成功
+     */
+    bool SendEmotion(const char* topic, const std::string& emotion);
+
 
     /**
      * @brief 发送设备状态
@@ -162,4 +176,12 @@ public:
      * @return 发送的字节数
      */
     int SendRawData(const uint8_t* data, size_t length);
+
+    // AT 命令配置相关方法
+    bool SendATCommand(const std::string& cmd, std::string& response, uint32_t timeout_ms = 1000);
+    bool ConfigureWiFiModule();
+    bool ConnectToWiFi(const char* ssid, const char* password);
+    bool ConfigureMQTT(const char* client_id, const char* server_addr, int port);
+    bool TestMQTTConnection();
+    
 };

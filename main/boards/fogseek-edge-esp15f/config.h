@@ -36,8 +36,23 @@
 #define AUDIO_CODEC_ES7210_ADDR ES7210_CODEC_DEFAULT_ADDR
 
 // UART串口配置（用于 ESP-15F透传模块）
+#define UART_PORT        UART_NUM_1 // UART1 串口
 #define UART_TX_PIN GPIO_NUM_43 // UART TX 引脚
 #define UART_RX_PIN GPIO_NUM_44 // UART RX 引脚
 #define UART_BAUD_RATE 115200   // 波特率
+
+// WiFi 配置
+#define WIFI_SSID "122320"
+#define WIFI_PASSWORD "12232000"
+
+// MQTT 配置
+#define MQTT_CLIENT_ID "ESP15F_Test_001"
+#define MQTT_SERVER_ADDR "8.138.244.44"  // 例如："192.168.1.100" 或域名
+#define MQTT_SERVER_PORT 1883
+
+// MQTT 发布主题配置
+#define MQTT_PUBLISH_TOPIC_CHAT "esp15f/chat"      // 聊天消息发布主题
+#define MQTT_PUBLISH_TOPIC_EMOTION "esp15f/emotion" // 情绪消息发布主题
+
 
 #endif

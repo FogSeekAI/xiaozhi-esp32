@@ -17,6 +17,7 @@
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 #include <driver/uart.h>
+#include "uart_transport.h"  // 新增：UART 传输类
 
 #define TAG "FogSeekEdgeEsp15F"
 
@@ -27,6 +28,8 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
+    UartTransport uart_transport_;  // 添加 UART 传输实例
+
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
@@ -150,6 +153,15 @@ private:
         }
     }
 
+    //串口消息转发
+
+    // 初始化 UART 串口通信
+    void InitializeUartTransport()
+    {
+        uart_transport_.Initialize(UART_PORT, UART_TX_PIN, UART_RX_PIN, UART_BAUD_RATE);
+        ESP_LOGI(TAG, "UART transport initialized for WiFi module");
+    }
+
     // 开机流程
     void PowerOn()
     {
@@ -161,6 +173,57 @@ private:
         SetAudioAmplifierState(true);
 
         ESP_LOGI(TAG, "Device powered on.");
+
+        // 配置 WiFi 模块（先测试通信并配置基本参数）
+        ESP_LOGI(TAG, "Configuring WiFi module...");
+        if (!uart_transport_.ConfigureWiFiModule())
+        {
+            ESP_LOGE(TAG, "Failed to configure WiFi module");
+            return;
+        }
+        
+        // 步骤 1: 配置 WiFi 模块（AT 测试、关闭回显、设置 WiFi 模式）
+        ESP_LOGI(TAG, "Step 1: Initializing WiFi module...");
+        if (!uart_transport_.ConfigureWiFiModule())
+        {
+            ESP_LOGE(TAG, "Failed to initialize WiFi module");
+            return;
+        }
+        ESP_LOGI(TAG, "WiFi module initialized");
+        
+        // 步骤 2: 连接到 WiFi
+        ESP_LOGI(TAG, "Step 2: Connecting to WiFi...");
+        if (uart_transport_.ConnectToWiFi(WIFI_SSID, WIFI_PASSWORD))
+        {
+            ESP_LOGI(TAG, "✓ WiFi connected");
+            
+            // 步骤 3: 配置 MQTT
+            ESP_LOGI(TAG, "Step 3: Configuring MQTT...");
+            if (uart_transport_.ConfigureMQTT(MQTT_CLIENT_ID, MQTT_SERVER_ADDR, MQTT_SERVER_PORT))
+            {
+                ESP_LOGI(TAG, "✓ MQTT configured");
+                
+                // 步骤 4: 测试 MQTT 连接
+                ESP_LOGI(TAG, "Step 4: Testing MQTT connection...");
+                if (uart_transport_.TestMQTTConnection())
+                {
+                    ESP_LOGI(TAG, "✓ MQTT test passed - Ready to communicate!");
+                }
+                else
+                {
+                    ESP_LOGE(TAG, "✗ MQTT test failed");
+                }
+            }
+            else
+            {
+                ESP_LOGE(TAG, "✗ MQTT configuration failed");
+            }
+        }
+        else
+        {
+            ESP_LOGE(TAG, "✗ WiFi connection failed");
+        }
+
 
         HandleAutoWake(); // 开机自动唤醒
     }
@@ -188,11 +251,20 @@ public:
         InitializeLedController();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
+        InitializeUartTransport();  // 初始化 UART
+
+        PowerOn();
+
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
+
+        
+  
     }
+
+    
 
     virtual AudioCodec *GetAudioCodec() override
     {
@@ -210,6 +282,30 @@ public:
             AUDIO_CODEC_ES7210_ADDR,
             AUDIO_INPUT_REFERENCE);
         return &audio_codec;
+    }
+
+    // 重写消息通知虚函数 - TTS 消息（AI 助手回复）
+    virtual void OnChatMessageReceived(const std::string& role, const std::string& content) override
+    {
+        ESP_LOGI(TAG, "Chat message received: role=%s, content=%s", role.c_str(), content.c_str());
+        
+        if (role == "assistant") {
+            uart_transport_.SendChatMessage(MQTT_PUBLISH_TOPIC_CHAT, ROLE_ASSISTANT, content);
+            ESP_LOGD(TAG, "Forwarded TTS message to WiFi module: %s", content.c_str());
+        } else if (role == "user") {
+            uart_transport_.SendChatMessage(MQTT_PUBLISH_TOPIC_CHAT, ROLE_USER, content);
+            ESP_LOGD(TAG, "Forwarded STT message to WiFi module: %s", content.c_str());
+        }
+    }
+
+    // 重写消息通知虚函数 - LLM 情绪消息
+    virtual void OnEmotionReceived(const std::string& emotion) override
+    {
+      ESP_LOGI(TAG, "Emotion received: %s", emotion.c_str());
+        
+        bool success = uart_transport_.SendEmotion(MQTT_PUBLISH_TOPIC_EMOTION, emotion);
+        ESP_LOGI(TAG, "Forwarded emotion to WiFi module: %s, result=%s", 
+                 emotion.c_str(), success ? "SUCCESS" : "FAILED");
     }
 
     ~FogSeekEdgeEsp15F()
