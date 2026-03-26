@@ -4,8 +4,6 @@
 
 #define TAG "UartTransport"
 
-// 新协议格式定义：
-// AA 55 | Type | Len_L Len_H | Payload | Checksum | 55 AA
 
 #define PROTOCOL_MIN_FRAME_LEN 8 // Header(2) + Type(1) + Len(2) + Checksum(1) + Footer(2) = 8
 // AT 命令相关常量
@@ -25,6 +23,7 @@ UartTransport::~UartTransport()
     }
 }
 
+// 串口初始化-----------------------------------------
 bool UartTransport::Initialize(uart_port_t uart_port, int tx_pin, int rx_pin, uint32_t baud_rate)
 {
     if (initialized_)
@@ -81,6 +80,7 @@ bool UartTransport::Initialize(uart_port_t uart_port, int tx_pin, int rx_pin, ui
     return true;
 }
 
+//---------------------------------------------------
 uint8_t UartTransport::CalculateCRC8(const uint8_t *data, size_t length)
 {
     uint8_t crc = 0x00;
@@ -115,7 +115,232 @@ uint8_t UartTransport::CalculateChecksum(const uint8_t *data, size_t length)
     return (uint8_t)(sum & 0xFF);
 }
 
-// AT 命令配置相关实现
+
+
+// 通信协议串口解析与应答-------------------------------------------
+
+
+bool UartTransport::SendData(const uint8_t *data, size_t length)
+{
+    if (!initialized_)
+    {
+        ESP_LOGE(TAG, "UART not initialized");
+        return false;
+    }
+
+    int sent = uart_write_bytes(uart_port_, data, length);
+    return sent == length;
+}
+
+bool UartTransport::SendString(const std::string &str)
+{
+    return SendData(reinterpret_cast<const uint8_t *>(str.c_str()), str.length());
+}
+
+int UartTransport::ReceiveData(uint8_t *buffer, size_t max_length, TickType_t timeout)
+{
+    if (!initialized_)
+    {
+        ESP_LOGE(TAG, "UART not initialized");
+        return -1;
+    }
+
+    return uart_read_bytes(uart_port_, buffer, max_length, timeout);
+}
+
+void UartTransport::UartReceiveTask()
+{
+    ESP_LOGI(TAG, "UART receive task started (protocol mode - receiver)");
+
+    uint8_t rx_buffer[512];
+    size_t rx_index = 0;
+
+    while (true)
+    {
+        int received = uart_read_bytes(uart_port_, rx_buffer + rx_index, sizeof(rx_buffer) - rx_index, pdMS_TO_TICKS(50));
+
+        if (received > 0)
+        {
+            rx_index += received;
+
+            while (rx_index >= PROTOCOL_MIN_FRAME_LEN)
+            {
+                if (rx_buffer[0] != PROTOCOL_HEADER_1 || rx_buffer[1] != PROTOCOL_HEADER_2)
+                {
+                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
+                    rx_index--;
+                    continue;
+                }
+
+                uint16_t payload_len = rx_buffer[3] | (rx_buffer[4] << 8);
+                size_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
+
+                ESP_LOGD(TAG, "Found frame header, payload_len=%d, frame_len=%zu, rx_index=%zu",
+                         payload_len, frame_len, rx_index);
+
+                if (rx_index < frame_len)
+                {
+                    break;
+                }
+
+                if (rx_buffer[frame_len - 2] != PROTOCOL_FOOTER_1 ||
+                    rx_buffer[frame_len - 1] != PROTOCOL_FOOTER_2)
+                {
+                    ESP_LOGW(TAG, "Invalid footer");
+                    SendErrorResponse(ERROR_LENGTH_ERROR);
+                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
+                    rx_index--;
+                    continue;
+                }
+
+                uint8_t checksum_data[3 + payload_len];
+                checksum_data[0] = rx_buffer[2];
+                checksum_data[1] = rx_buffer[3];
+                checksum_data[2] = rx_buffer[4];
+                memcpy(checksum_data + 3, rx_buffer + 5, payload_len);
+
+                uint8_t calculated_checksum = CalculateChecksum(checksum_data, 3 + payload_len);
+                uint8_t received_checksum = rx_buffer[5 + payload_len];
+
+                if (calculated_checksum != received_checksum)
+                {
+                    ESP_LOGW(TAG, "Checksum mismatch");
+                    SendErrorResponse(ERROR_CHECKSUM_ERROR);
+                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
+                    rx_index--;
+                    continue;
+                }
+
+                uint8_t msg_type = rx_buffer[2];
+
+                if (msg_type != MSG_TYPE_EMOTION &&
+                    msg_type != MSG_TYPE_AUDIO_CONTROL &&
+                    msg_type != MSG_TYPE_VOLUME_CONTROL &&
+                    msg_type != MSG_TYPE_ACK &&
+                    msg_type != MSG_TYPE_ERROR)
+                {
+                    ESP_LOGW(TAG, "Unknown message type: 0x%02X", msg_type);
+                    SendErrorResponse(ERROR_UNKNOWN_TYPE);
+                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
+                    rx_index--;
+                    continue;
+                }
+
+                uint8_t str_len = rx_buffer[5];
+
+                if (str_len > payload_len - 1)
+                {
+                    ESP_LOGW(TAG, "Invalid string length");
+                    SendErrorResponse(ERROR_LENGTH_ERROR);
+                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
+                    rx_index--;
+                    continue;
+                }
+
+                std::string content((char *)(rx_buffer + 6), str_len);
+
+                ESP_LOGI(TAG, "✓ Received: Type=0x%02X, Content=\"%s\"", msg_type, content.c_str());
+
+                // 调用回调函数，将消息类型和内容传递给上层
+                if (message_callback_)
+                {
+                    message_callback_(msg_type, content);
+                }
+
+                memmove(rx_buffer, rx_buffer + frame_len, rx_index - frame_len);
+                rx_index -= frame_len;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+}
+
+void UartTransport::StartReceiveTask(MessageCallback callback)
+{
+    if (receive_task_handle_ != nullptr)
+    {
+        ESP_LOGW(TAG, "Receive task already running");
+        return;
+    }
+
+    message_callback_ = callback;
+
+    xTaskCreate([](void *arg)
+                { static_cast<UartTransport *>(arg)->UartReceiveTask(); }, "uart_receive_task", 4096, this, 5, &receive_task_handle_);
+
+    ESP_LOGI(TAG, "UART receive task created");
+}
+
+// 发送应答帧
+void UartTransport::SendAckResponse(uint8_t responded_type, uint8_t result_code)
+{
+    if (!initialized_)
+        return;
+
+    uint8_t payload_len = 2;
+    uint8_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
+    uint8_t buffer[frame_len];
+    size_t idx = 0;
+
+    buffer[idx++] = PROTOCOL_HEADER_1;
+    buffer[idx++] = PROTOCOL_HEADER_2;
+    buffer[idx++] = MSG_TYPE_ACK;
+    buffer[idx++] = payload_len & 0xFF;
+    buffer[idx++] = (payload_len >> 8) & 0xFF;
+    buffer[idx++] = responded_type;
+    buffer[idx++] = result_code;
+
+    uint8_t checksum_data[3 + payload_len];
+    checksum_data[0] = buffer[2];
+    checksum_data[1] = buffer[3];
+    checksum_data[2] = buffer[4];
+    memcpy(checksum_data + 3, buffer + 5, payload_len);
+    buffer[idx++] = CalculateChecksum(checksum_data, 3 + payload_len);
+
+    buffer[idx++] = PROTOCOL_FOOTER_1;
+    buffer[idx++] = PROTOCOL_FOOTER_2;
+
+    ESP_LOGD(TAG, "Sending ACK: type=0x%02X, result=0x%02X", responded_type, result_code);
+    uart_write_bytes(uart_port_, buffer, frame_len);
+}
+
+// 发送错误帧
+void UartTransport::SendErrorResponse(uint8_t error_code)
+{
+    if (!initialized_)
+        return;
+
+    uint8_t payload_len = 1;
+    uint8_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
+    uint8_t buffer[frame_len];
+    size_t idx = 0;
+
+    buffer[idx++] = PROTOCOL_HEADER_1;
+    buffer[idx++] = PROTOCOL_HEADER_2;
+    buffer[idx++] = MSG_TYPE_ERROR;
+    buffer[idx++] = payload_len & 0xFF;
+    buffer[idx++] = (payload_len >> 8) & 0xFF;
+    buffer[idx++] = error_code;
+
+    uint8_t checksum_data[3 + payload_len];
+    checksum_data[0] = buffer[2];
+    checksum_data[1] = buffer[3];
+    checksum_data[2] = buffer[4];
+    memcpy(checksum_data + 3, buffer + 5, payload_len);
+    buffer[idx++] = CalculateChecksum(checksum_data, 3 + payload_len);
+
+    buffer[idx++] = PROTOCOL_FOOTER_1;
+    buffer[idx++] = PROTOCOL_FOOTER_2;
+
+    ESP_LOGD(TAG, "Sending ERROR: code=0x%02X", error_code);
+    uart_write_bytes(uart_port_, buffer, frame_len);
+}
+
+//---------------------------------------------------
+
+
+// WIFI , MQTT配置-----------------------------------
 bool UartTransport::SendATCommand(const std::string& cmd, std::string& response, uint32_t timeout_ms)
 {
     if (!initialized_)
@@ -431,259 +656,9 @@ bool UartTransport::TestMQTTConnection()
     return true;
 }
 
-// 任务串口通信测试-------------------------------------------
-bool UartTransport::SendData(const uint8_t *data, size_t length)
-{
-    if (!initialized_)
-    {
-        ESP_LOGE(TAG, "UART not initialized");
-        return false;
-    }
-
-    int sent = uart_write_bytes(uart_port_, data, length);
-    return sent == length;
-}
-
-bool UartTransport::SendString(const std::string &str)
-{
-    return SendData(reinterpret_cast<const uint8_t *>(str.c_str()), str.length());
-}
-
-int UartTransport::ReceiveData(uint8_t *buffer, size_t max_length, TickType_t timeout)
-{
-    if (!initialized_)
-    {
-        ESP_LOGE(TAG, "UART not initialized");
-        return -1;
-    }
-
-    return uart_read_bytes(uart_port_, buffer, max_length, timeout);
-}
-
-void UartTransport::UartReceiveTask()
-{
-    ESP_LOGI(TAG, "UART receive task started (protocol mode - receiver)");
-
-    uint8_t rx_buffer[512];
-    size_t rx_index = 0;
-
-    while (true)
-    {
-        int received = uart_read_bytes(uart_port_, rx_buffer + rx_index, sizeof(rx_buffer) - rx_index, pdMS_TO_TICKS(50));
-
-        if (received > 0)
-        {
-            rx_index += received;
-
-            while (rx_index >= PROTOCOL_MIN_FRAME_LEN)
-            {
-                if (rx_buffer[0] != PROTOCOL_HEADER_1 || rx_buffer[1] != PROTOCOL_HEADER_2)
-                {
-                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
-                    rx_index--;
-                    continue;
-                }
-
-                uint16_t payload_len = rx_buffer[3] | (rx_buffer[4] << 8);
-                size_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
-
-                ESP_LOGD(TAG, "Found frame header, payload_len=%d, frame_len=%zu, rx_index=%zu",
-                         payload_len, frame_len, rx_index);
-
-                if (rx_index < frame_len)
-                {
-                    break;
-                }
-
-                if (rx_buffer[frame_len - 2] != PROTOCOL_FOOTER_1 ||
-                    rx_buffer[frame_len - 1] != PROTOCOL_FOOTER_2)
-                {
-                    ESP_LOGW(TAG, "Invalid footer");
-                    SendErrorResponse(ERROR_LENGTH_ERROR);
-                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
-                    rx_index--;
-                    continue;
-                }
-
-                uint8_t checksum_data[3 + payload_len];
-                checksum_data[0] = rx_buffer[2];
-                checksum_data[1] = rx_buffer[3];
-                checksum_data[2] = rx_buffer[4];
-                memcpy(checksum_data + 3, rx_buffer + 5, payload_len);
-
-                uint8_t calculated_checksum = CalculateChecksum(checksum_data, 3 + payload_len);
-                uint8_t received_checksum = rx_buffer[5 + payload_len];
-
-                if (calculated_checksum != received_checksum)
-                {
-                    ESP_LOGW(TAG, "Checksum mismatch");
-                    SendErrorResponse(ERROR_CHECKSUM_ERROR);
-                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
-                    rx_index--;
-                    continue;
-                }
-
-                uint8_t msg_type = rx_buffer[2];
-
-                if (msg_type != MSG_TYPE_EMOTION &&
-                    msg_type != MSG_TYPE_AUDIO_CONTROL &&
-                    msg_type != MSG_TYPE_VOLUME_CONTROL &&
-                    msg_type != MSG_TYPE_ACK &&
-                    msg_type != MSG_TYPE_ERROR)
-                {
-                    ESP_LOGW(TAG, "Unknown message type: 0x%02X", msg_type);
-                    SendErrorResponse(ERROR_UNKNOWN_TYPE);
-                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
-                    rx_index--;
-                    continue;
-                }
-
-                uint8_t str_len = rx_buffer[5];
-
-                if (str_len > payload_len - 1)
-                {
-                    ESP_LOGW(TAG, "Invalid string length");
-                    SendErrorResponse(ERROR_LENGTH_ERROR);
-                    memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
-                    rx_index--;
-                    continue;
-                }
-
-                std::string content((char *)(rx_buffer + 6), str_len);
-
-                ESP_LOGI(TAG, "✓ Received: Type=0x%02X, Content=\"%s\"", msg_type, content.c_str());
-
-                // 调用回调函数，将消息类型和内容传递给上层
-                if (message_callback_)
-                {
-                    message_callback_(msg_type, content);
-                }
-
-                memmove(rx_buffer, rx_buffer + frame_len, rx_index - frame_len);
-                rx_index -= frame_len;
-            }
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
-}
-
-void UartTransport::StartReceiveTask(MessageCallback callback)
-{
-    if (receive_task_handle_ != nullptr)
-    {
-        ESP_LOGW(TAG, "Receive task already running");
-        return;
-    }
-
-    message_callback_ = callback;
-
-    xTaskCreate([](void *arg)
-                { static_cast<UartTransport *>(arg)->UartReceiveTask(); }, "uart_receive_task", 4096, this, 5, &receive_task_handle_);
-
-    ESP_LOGI(TAG, "UART receive task created");
-}
-
-// 发送应答帧
-void UartTransport::SendAckResponse(uint8_t responded_type, uint8_t result_code)
-{
-    if (!initialized_)
-        return;
-
-    uint8_t payload_len = 2;
-    uint8_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
-    uint8_t buffer[frame_len];
-    size_t idx = 0;
-
-    buffer[idx++] = PROTOCOL_HEADER_1;
-    buffer[idx++] = PROTOCOL_HEADER_2;
-    buffer[idx++] = MSG_TYPE_ACK;
-    buffer[idx++] = payload_len & 0xFF;
-    buffer[idx++] = (payload_len >> 8) & 0xFF;
-    buffer[idx++] = responded_type;
-    buffer[idx++] = result_code;
-
-    uint8_t checksum_data[3 + payload_len];
-    checksum_data[0] = buffer[2];
-    checksum_data[1] = buffer[3];
-    checksum_data[2] = buffer[4];
-    memcpy(checksum_data + 3, buffer + 5, payload_len);
-    buffer[idx++] = CalculateChecksum(checksum_data, 3 + payload_len);
-
-    buffer[idx++] = PROTOCOL_FOOTER_1;
-    buffer[idx++] = PROTOCOL_FOOTER_2;
-
-    ESP_LOGD(TAG, "Sending ACK: type=0x%02X, result=0x%02X", responded_type, result_code);
-    uart_write_bytes(uart_port_, buffer, frame_len);
-}
-
-// 发送错误帧
-void UartTransport::SendErrorResponse(uint8_t error_code)
-{
-    if (!initialized_)
-        return;
-
-    uint8_t payload_len = 1;
-    uint8_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
-    uint8_t buffer[frame_len];
-    size_t idx = 0;
-
-    buffer[idx++] = PROTOCOL_HEADER_1;
-    buffer[idx++] = PROTOCOL_HEADER_2;
-    buffer[idx++] = MSG_TYPE_ERROR;
-    buffer[idx++] = payload_len & 0xFF;
-    buffer[idx++] = (payload_len >> 8) & 0xFF;
-    buffer[idx++] = error_code;
-
-    uint8_t checksum_data[3 + payload_len];
-    checksum_data[0] = buffer[2];
-    checksum_data[1] = buffer[3];
-    checksum_data[2] = buffer[4];
-    memcpy(checksum_data + 3, buffer + 5, payload_len);
-    buffer[idx++] = CalculateChecksum(checksum_data, 3 + payload_len);
-
-    buffer[idx++] = PROTOCOL_FOOTER_1;
-    buffer[idx++] = PROTOCOL_FOOTER_2;
-
-    ESP_LOGD(TAG, "Sending ERROR: code=0x%02X", error_code);
-    uart_write_bytes(uart_port_, buffer, frame_len);
-}
-
 //---------------------------------------------------
 
-// 辅助函数：将字符串转换为十六进制字符串
-static std::string StringToHex(const std::string& str)
-{
-    static const char hex_chars[] = "0123456789ABCDEF";
-    std::string result;
-    result.reserve(str.length() * 2);
-    
-    for (char c : str)
-    {
-        result += hex_chars[(c >> 4) & 0x0F];
-        result += hex_chars[c & 0x0F];
-    }
-    
-    return result;
-}
-
-// 辅助函数：转义字符串中的双引号和反斜杠
-static std::string EscapeJsonString(const std::string& str)
-{
-    std::string result;
-    result.reserve(str.length() * 2);
-    
-    for (char c : str)
-    {
-        if (c == '"' || c == '\\')
-        {
-            result += '\\';
-        }
-        result += c;
-    }
-    
-    return result;
-}
+// 消息发送------------------------------------------
 
 bool UartTransport::SendChatMessage(role_type_t role, const std::string& content)
 {
@@ -763,38 +738,7 @@ bool UartTransport::SendEmotion(const char* topic, const std::string& emotion)
 }
 
 
-/* bool UartTransport::SendDeviceState(const std::string &state)
-{
-    if (!initialized_)
-    {
-        ESP_LOGE(TAG, "UART not initialized");
-        return false;
-    }
 
-    // 构建消息体：{"state": "..."}
-    char payload[128];
-    snprintf(payload, sizeof(payload), "{\"state\":\"%s\"}", state.c_str());
-
-    size_t payload_len = strlen(payload);
-    uint8_t buffer[PROTOCOL_OVERHEAD + payload_len];
-
-    // 填充帧头
-    buffer[0] = PROTOCOL_HEADER_1;
-    buffer[1] = PROTOCOL_HEADER_2;
-    // 消息类型
-    buffer[2] = MSG_TYPE_DEVICE_STATE;
-    // 数据长度（小端序）
-    buffer[3] = payload_len & 0xFF;
-    buffer[4] = (payload_len >> 8) & 0xFF;
-    // 复制 payload
-    memcpy(buffer + 5, payload, payload_len);
-    // 计算 CRC8
-    buffer[5 + payload_len] = CalculateCRC8(buffer, 5 + payload_len);
-
-    ESP_LOGD(TAG, "Sending device state: %s", state.c_str());
-    int sent = uart_write_bytes(uart_port_, buffer, sizeof(buffer));
-    return sent == sizeof(buffer);
-} */
 
 int UartTransport::SendRawData(const uint8_t *data, size_t length)
 {
@@ -807,3 +751,5 @@ int UartTransport::SendRawData(const uint8_t *data, size_t length)
     ESP_LOGD(TAG, "Sending raw data: %zu bytes", length);
     return uart_write_bytes(uart_port_, data, length);
 }
+
+//---------------------------------------------------
