@@ -50,4 +50,9 @@
 #define MQTT_SERVER_ADDR "8.138.244.44"  // 例如："192.168.1.100" 或域名
 #define MQTT_SERVER_PORT 1883
 
+// MQTT 发布主题配置
+#define MQTT_PUBLISH_TOPIC_CHAT "esp15f/chat"      // 聊天消息发布主题
+#define MQTT_PUBLISH_TOPIC_EMOTION "esp15f/emotion" // 情绪消息发布主题
+
+
 #endif

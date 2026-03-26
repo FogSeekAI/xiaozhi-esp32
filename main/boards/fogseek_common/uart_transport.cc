@@ -687,9 +687,21 @@ static std::string EscapeJsonString(const std::string& str)
 
 bool UartTransport::SendChatMessage(role_type_t role, const std::string& content)
 {
+    // 默认使用 esp15f/test 主题（保持向后兼容）
+    return SendChatMessage("esp15f/test", role, content);
+}
+
+bool UartTransport::SendChatMessage(const char* topic, role_type_t role, const std::string& content)
+{
     if (!initialized_)
     {
         ESP_LOGE(TAG, "UART not initialized");
+        return false;
+    }
+    
+    if (topic == nullptr || strlen(topic) == 0)
+    {
+        ESP_LOGE(TAG, "Invalid topic");
         return false;
     }
 
@@ -698,11 +710,11 @@ bool UartTransport::SendChatMessage(role_type_t role, const std::string& content
     char payload[512];
     snprintf(payload, sizeof(payload), "%d|%s", role, content.c_str());
 
-    // 使用 AT+MQTTPUB 发布
-    std::string cmd = "AT+MQTTPUB=0,\"esp15f/test\",\"" + std::string(payload) + "\",1,0";
+    // 使用 AT+MQTTPUB 发布到指定主题
+    std::string cmd = "AT+MQTTPUB=0,\"" + std::string(topic) + "\",\"" + std::string(payload) + "\",1,0";
     std::string response;
     
-    ESP_LOGI(TAG, "Publishing chat message via MQTT: %s", payload);
+    ESP_LOGI(TAG, "Publishing chat message via MQTT to topic '%s': %s", topic, payload);
     bool success = SendATCommand(cmd, response, 5000);
     
     if (success) {
@@ -716,20 +728,29 @@ bool UartTransport::SendChatMessage(role_type_t role, const std::string& content
 
 bool UartTransport::SendEmotion(const std::string& emotion)
 {
+    // 默认使用 esp15f/test 主题（保持向后兼容）
+    return SendEmotion("esp15f/test", emotion);
+}
+
+bool UartTransport::SendEmotion(const char* topic, const std::string& emotion)
+{
     if (!initialized_)
     {
         ESP_LOGE(TAG, "UART not initialized");
         return false;
     }
-
-    // 构建简化格式的 payload: emotion_value (例如：happy)
-    // 直接使用 emotion 字符串，不需要额外格式
     
-    // 使用 AT+MQTTPUB 发布
-    std::string cmd = "AT+MQTTPUB=0,\"esp15f/test\",\"" + emotion + "\",1,0";
+    if (topic == nullptr || strlen(topic) == 0)
+    {
+        ESP_LOGE(TAG, "Invalid topic");
+        return false;
+    }
+
+    // 使用 AT+MQTTPUB 发布到指定主题
+    std::string cmd = "AT+MQTTPUB=0,\"" + std::string(topic) + "\",\"" + emotion + "\",1,0";
     std::string response;
     
-    ESP_LOGI(TAG, "Publishing emotion via MQTT: %s", emotion.c_str());
+    ESP_LOGI(TAG, "Publishing emotion via MQTT to topic '%s': %s", topic, emotion.c_str());
     bool success = SendATCommand(cmd, response, 5000);
     
     if (success) {

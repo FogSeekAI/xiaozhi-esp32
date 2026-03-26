@@ -137,11 +137,30 @@ public:
     bool SendChatMessage(role_type_t role, const std::string& content);
 
     /**
+     * @brief 发送聊天消息到指定主题
+     * @param topic 发布主题
+     * @param role 消息角色（user/assistant/system）
+     * @param content 消息内容
+     * @return 是否成功
+     */
+    bool SendChatMessage(const char* topic, role_type_t role, const std::string& content);
+
+
+    /**
      * @brief 发送情绪信息
      * @param emotion 情绪字符串（如"happy", "sad", "neutral"等）
      * @return 是否成功
      */
     bool SendEmotion(const std::string& emotion);
+
+    /**
+     * @brief 发送情绪信息到指定主题
+     * @param topic 发布主题
+     * @param emotion 情绪字符串
+     * @return 是否成功
+     */
+    bool SendEmotion(const char* topic, const std::string& emotion);
+
 
     /**
      * @brief 发送设备状态

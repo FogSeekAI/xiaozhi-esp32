@@ -290,10 +290,10 @@ public:
         ESP_LOGI(TAG, "Chat message received: role=%s, content=%s", role.c_str(), content.c_str());
         
         if (role == "assistant") {
-            uart_transport_.SendChatMessage(ROLE_ASSISTANT, content);
+            uart_transport_.SendChatMessage(MQTT_PUBLISH_TOPIC_CHAT, ROLE_ASSISTANT, content);
             ESP_LOGD(TAG, "Forwarded TTS message to WiFi module: %s", content.c_str());
         } else if (role == "user") {
-            uart_transport_.SendChatMessage(ROLE_USER, content);
+            uart_transport_.SendChatMessage(MQTT_PUBLISH_TOPIC_CHAT, ROLE_USER, content);
             ESP_LOGD(TAG, "Forwarded STT message to WiFi module: %s", content.c_str());
         }
     }
@@ -303,10 +303,10 @@ public:
     {
       ESP_LOGI(TAG, "Emotion received: %s", emotion.c_str());
         
-        bool success = uart_transport_.SendEmotion(emotion);
+        bool success = uart_transport_.SendEmotion(MQTT_PUBLISH_TOPIC_EMOTION, emotion);
         ESP_LOGI(TAG, "Forwarded emotion to WiFi module: %s, result=%s", 
                  emotion.c_str(), success ? "SUCCESS" : "FAILED");
-  }
+    }
 
     ~FogSeekEdgeEsp15F()
     {
