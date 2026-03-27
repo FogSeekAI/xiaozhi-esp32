@@ -50,6 +50,9 @@ file(GLOB FOGSEEK_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/fogseek_comm
 list(APPEND SOURCES ${FOGSEEK_COMMON_SOURCES})
 list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/fogseek_common)
 
+# Add fogseek common C files (for TCA6408A driver)
+file(GLOB FOGSEEK_COMMON_C_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/fogseek_common/*.c)
+list(APPEND SOURCES ${FOGSEEK_COMMON_C_SOURCES})
 
 idf_build_get_property(build_components BUILD_COMPONENTS)
 # Function to find component dynamically by pattern
