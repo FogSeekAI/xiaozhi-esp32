@@ -269,6 +269,11 @@ public:
         return &audio_codec;
     }
 
+    virtual Led *GetLed() override
+    {
+        return led_controller_.GetGreenLed();
+    }
+
     ~FogSeekEdge()
     {
         if (i2c_bus_)
