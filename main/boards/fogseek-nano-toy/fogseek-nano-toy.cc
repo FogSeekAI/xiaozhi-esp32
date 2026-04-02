@@ -20,10 +20,47 @@
 #include <freertos/task.h>
 #include <driver/touch_pad.h>
 #include <driver/ledc.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/event_groups.h>
 
 
 #define TAG "FogSeekNanoToy"
 
+extern "C" void IRAM_ATTR gpio44_isr_handler_c(void);
+
+
+// 全局去抖计数器（用于中断处理）
+static volatile uint32_t g_gpio44_debounce_count = 0;
+
+// 全局事件组指针（用于中断处理）
+static volatile EventGroupHandle_t* g_sensor_event_group_ptr = nullptr;
+
+  // GPIO44 中断处理函数（静态）
+    void IRAM_ATTR gpio44_isr_handler_c(void* arg)
+{
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    
+    uint32_t gpio_status = gpio_get_level(TOUCH_SENSOR_1_GPIO);
+    
+    if (gpio_status == 1) {
+        if (g_sensor_event_group_ptr != NULL) {
+                xEventGroupSetBitsFromISR(*g_sensor_event_group_ptr, 
+                                          BIT0, 
+                                          &xHigherPriorityTaskWoken);
+            }
+    } else {
+        g_gpio44_debounce_count = 0;
+            if (g_sensor_event_group_ptr != NULL) {
+            xEventGroupSetBitsFromISR(*g_sensor_event_group_ptr, 
+                                      BIT1, 
+                                      &xHigherPriorityTaskWoken);
+        }
+    }
+    
+    if (xHigherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
+    }
+}
 
 class FogSeekNanoToy : public WifiBoard
 {
@@ -53,6 +90,23 @@ private:
 
     mutable bool gpio43_output_enabled_ = false;
     mutable bool gpio43_current_state_ = false;  // 记录 GPIO43 当前状态
+
+    // 事件组用于任务间同步
+    EventGroupHandle_t sensor_event_group_ = nullptr;
+    static constexpr uint32_t TOUCH1_PRESSED_EVENT = BIT0;
+    static constexpr uint32_t TOUCH1_RELEASED_EVENT = BIT1;
+    static constexpr uint32_t TOUCH2_PRESSED_EVENT = BIT2;
+
+    // 任务句柄
+    TaskHandle_t audio_task_handle_ = nullptr;
+    TaskHandle_t motor_task_handle_ = nullptr;
+
+    // 异步日志缓冲区
+    static constexpr int LOG_BUFFER_SIZE = 256;
+    char log_buffer_[LOG_BUFFER_SIZE];
+
+    
+
 
     // 初始化I2C外设
     void InitializeI2c()
@@ -159,66 +213,58 @@ private:
     {
         auto instance = static_cast<FogSeekNanoToy *>(pvParameters);
         
-        ESP_LOGI(TAG, "Sensor monitoring task started");
+        ESP_LOGI(TAG, "Sensor monitoring task started (optimized)");
+        
+        // 电容触摸去抖动
+        uint32_t touch2_debounce_count = 0;
+        const uint32_t DEBOUNCE_THRESHOLD = 2;
+        uint32_t last_cap_value = 0;
         
         while (true) {
-            // 读取雷达传感器
+            // 读取雷达传感器（低优先级）
             bool radar_state = instance->ReadRadarSensor();
             if (radar_state != instance->last_radar_state_) {
                 instance->last_radar_state_ = radar_state;
-                if (radar_state) {
-                    ESP_LOGI(TAG, ">>> Radar: Object DETECTED!");
-                } else {
-                    ESP_LOGI(TAG, ">>> Radar: No object detected");
-                }
+                snprintf(instance->log_buffer_, instance->LOG_BUFFER_SIZE, 
+                         "Radar: %s", radar_state ? "DETECTED" : "NONE");
+                ESP_LOGD(TAG, "%s", instance->log_buffer_);
             }
             
-            // 读取 GPIO44 普通触摸传感器 - 直接读取电平判断状态
-            int touch1_level = gpio_get_level(TOUCH_SENSOR_1_GPIO);
-            bool touch1_detected = (touch1_level == 1);
+            // 电容触摸检测（带平滑滤波）
+            uint32_t cap_value = instance->touch_sensor_2_.ReadCapTouchValue();
+            uint32_t baseline = instance->touch_sensor_2_.GetBaseline();
             
-            // 如果状态发生变化，更新并显示
-            if (touch1_detected != instance->last_touch1_state_) {
-                instance->last_touch1_state_ = touch1_detected;
-                if (touch1_detected) {
-                    ESP_LOGI(TAG, ">>> Touch 1 (GPIO%d): PRESSED!", TOUCH_SENSOR_1_GPIO);
-                    // 播放小狗叫声
-                    auto &app = Application::GetInstance();
-                    app.PlaySound(Lang::Sounds::OGG_DOG_VOICE03);
-                    ESP_LOGI(TAG, ">>> Playing dog voice");
-                    
-                    // Touch 1 被按下，开启电机（50% 占空比）
-                    instance->SetMotorDutyCycle(50);
-                    ESP_LOGI(TAG, ">>> Motor turned ON by Touch 1 (50%% duty cycle)");
-                } else {
-                    ESP_LOGI(TAG, ">>> Touch 1 (GPIO%d): RELEASED", TOUCH_SENSOR_1_GPIO);
-                    // Touch 1 释放，关闭电机
-                    instance->SetMotorDutyCycle(100);
-                    ESP_LOGI(TAG, ">>> Motor turned OFF by Touch 1");
-                }
-            }
+            // 简单的移动平均滤波
+            cap_value = (last_cap_value * 3 + cap_value) / 4;
+            last_cap_value = cap_value;
             
-            // 读取 GPIO9 电容触摸传感器
-            uint32_t touch2_value = instance->touch_sensor_2_.ReadCapTouchValue();
-            int32_t touch2_delta = (int32_t)touch2_value - (int32_t)instance->touch_sensor_2_.GetBaseline();
             bool touch2_detected = instance->touch_sensor_2_.IsCapTouchDetected();
             
-            if (touch2_detected != instance->last_touch2_state_) {
-                instance->last_touch2_state_ = touch2_detected;
-                if (touch2_detected) {
-                    ESP_LOGI(TAG, ">>> Touch 2 (GPIO9): TOUCHED! Value: %" PRIu32 
-                             ", Delta: %" PRId32,
-                             touch2_value, touch2_delta);
-                    
-                    // Touch 2 被触摸，增加占空比 10%
-                    instance->IncreaseMotorDutyCycle(10);
-                    ESP_LOGI(TAG, ">>> Motor speed increased by Touch 2");
-                } else {
-                    ESP_LOGI(TAG, ">>> Touch 2 (GPIO9): RELEASED");
+            if (touch2_detected) {
+                if (++touch2_debounce_count >= DEBOUNCE_THRESHOLD) {
+                    if (!instance->last_touch2_state_) {
+                        instance->last_touch2_state_ = true;
+                        xEventGroupSetBits(instance->sensor_event_group_, TOUCH2_PRESSED_EVENT);
+                        
+                        int32_t delta = (int32_t)cap_value - (int32_t)baseline;
+                        snprintf(instance->log_buffer_, instance->LOG_BUFFER_SIZE,
+                                 "Touch 2: TOUCHED (val=%lu, delta=%ld)", cap_value, delta);
+                        ESP_LOGI(TAG, "%s", instance->log_buffer_);
+                    }
+                    touch2_debounce_count = DEBOUNCE_THRESHOLD;
+                }
+            } else {
+                if (touch2_debounce_count > 0) {
+                    touch2_debounce_count--;
+                }
+                if (touch2_debounce_count == 0 && instance->last_touch2_state_) {
+                    instance->last_touch2_state_ = false;
+                    ESP_LOGD(TAG, "Touch 2: RELEASED");
                 }
             }
             
-            vTaskDelay(pdMS_TO_TICKS(100));
+            // 快速响应周期
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
 
@@ -226,33 +272,41 @@ private:
      // 初始化电机 PWM
     void InitializeMotorPwm()
     {
-          // 配置 LEDC 定时器
-        ledc_timer_config_t ledc_timer;
-        ledc_timer.speed_mode = LEDC_LOW_SPEED_MODE;
-        ledc_timer.duty_resolution = LEDC_TIMER_12_BIT;
-        ledc_timer.timer_num = LEDC_TIMER_0;
-        ledc_timer.freq_hz = 5000;
-        ledc_timer.clk_cfg = LEDC_AUTO_CLK;
-        ledc_timer.deconfigure = false;
+        // 首先确保 GPIO 处于正确的状态
+        gpio_reset_pin((gpio_num_t)MOTOR_GPIO);
+        gpio_set_direction((gpio_num_t)MOTOR_GPIO, GPIO_MODE_OUTPUT);
+        gpio_set_level((gpio_num_t)MOTOR_GPIO, 0);
+        
+        // 配置 LEDC 定时器
+        ledc_timer_config_t ledc_timer = {
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .duty_resolution = LEDC_TIMER_12_BIT,
+            .timer_num = LEDC_TIMER_0,
+            .freq_hz = 5000,
+            .clk_cfg = LEDC_AUTO_CLK,
+        };
         
         ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
         
-        // 配置 LEDC 通道
-        ledc_channel_config_t ledc_channel;
-        ledc_channel.gpio_num = MOTOR_GPIO;
-        ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
-        ledc_channel.channel = LEDC_CHANNEL_0;
-        ledc_channel.intr_type = LEDC_INTR_DISABLE;
-        ledc_channel.timer_sel = LEDC_TIMER_0;
-        ledc_channel.duty = 0;
-        ledc_channel.hpoint = 0;
+        // 配置 LEDC 通道 - 使用完整的初始化列表
+        ledc_channel_config_t ledc_channel = {
+            .gpio_num = MOTOR_GPIO,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .channel = LEDC_CHANNEL_0,
+            .intr_type = LEDC_INTR_DISABLE,
+            .timer_sel = LEDC_TIMER_0,
+            .duty = 0,
+            .hpoint = 0,
+            .flags = {
+                .output_invert = 0,
+            },
+        };
         
         ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
         
-        motor_duty_cycle_ = 0;  // 初始占空比为 0
+        motor_duty_cycle_ = 0;
         
-        ESP_LOGI(TAG, "Motor PWM initialized on GPIO %d, initial duty: 0%%", MOTOR_GPIO);
-   
+        ESP_LOGI(TAG, "Motor PWM initialized on GPIO %d", MOTOR_GPIO);
     }
 
      // 设置电机占空比 (0-100%)
@@ -262,12 +316,16 @@ private:
             percentage = 100;
         }
         
-        // 将百分比转换为 12 位值 (0-4095)
-        motor_duty_cycle_ = (percentage * 4095) / 100;
-        ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, motor_duty_cycle_);
-        ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+        uint32_t new_duty_cycle = (percentage * 4095) / 100;
         
-        ESP_LOGI(TAG, "Motor duty cycle set to %d%% (%d)", percentage, motor_duty_cycle_);
+        // 将百分比转换为 12 位值 (0-4095)
+        if (motor_duty_cycle_ != new_duty_cycle) {
+            motor_duty_cycle_ = new_duty_cycle;
+            ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, motor_duty_cycle_);
+            ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+            
+            ESP_LOGI(TAG, "Motor duty cycle set to %d%% (%d)", percentage, motor_duty_cycle_);
+        }
     }
     
     // 增加电机占空比
@@ -283,6 +341,98 @@ private:
         SetMotorDutyCycle(new_percentage);
     }
 
+  
+
+
+    // 初始化 Touch 1 的硬件中断
+     void InitializeTouch1Interrupt()
+    {
+        g_gpio44_debounce_count = 0;
+        g_sensor_event_group_ptr = &sensor_event_group_;
+        
+        gpio_config_t io_conf = {};
+        io_conf.pin_bit_mask = (1ULL << TOUCH_SENSOR_1_GPIO);
+        io_conf.mode = GPIO_MODE_INPUT;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+        io_conf.intr_type = GPIO_INTR_ANYEDGE;
+        gpio_config(&io_conf);
+        
+        gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+        gpio_isr_handler_add((gpio_num_t)TOUCH_SENSOR_1_GPIO, gpio44_isr_handler_c, NULL);
+        
+        ESP_LOGI(TAG, "Touch 1 hardware interrupt initialized on GPIO%d", TOUCH_SENSOR_1_GPIO);
+    }
+
+
+    // 音频播放任务（独立优先级）
+    static void AudioTask(void* pvParameters)
+    {
+        auto instance = static_cast<FogSeekNanoToy*>(pvParameters);
+        uint32_t events;
+        
+        while (true) {
+            events = xEventGroupWaitBits(instance->sensor_event_group_, 
+                                         TOUCH1_PRESSED_EVENT,
+                                         pdTRUE,
+                                         pdFALSE,
+                                         portMAX_DELAY);
+            
+            if (events & TOUCH1_PRESSED_EVENT) {
+                ESP_LOGI(TAG, "AudioTask: Playing sound");
+                auto& app = Application::GetInstance();
+                app.PlaySound(Lang::Sounds::OGG_KUNKUN);
+            }
+        }
+    }
+
+    // 电机控制任务（独立优先级）
+    static void MotorTask(void* pvParameters)
+    {
+        auto instance = static_cast<FogSeekNanoToy*>(pvParameters);
+        uint32_t events;
+        uint8_t target_duty = 0;
+        uint8_t last_logged_duty = 255;  // 初始化为不可能的值
+        
+        while (true) {
+            events = xEventGroupWaitBits(instance->sensor_event_group_, 
+                                         TOUCH1_PRESSED_EVENT | TOUCH1_RELEASED_EVENT | TOUCH2_PRESSED_EVENT,
+                                         pdTRUE,
+                                         pdFALSE,
+                                         pdMS_TO_TICKS(10));
+            
+            if (events & TOUCH1_PRESSED_EVENT) {
+                target_duty = 50;
+                if (target_duty != last_logged_duty) {
+                    ESP_LOGI(TAG, "MotorTask: ON (50%%)");
+                    last_logged_duty = target_duty;
+                }
+            }
+            else if (events & TOUCH1_RELEASED_EVENT) {
+                target_duty = 100;
+                if (target_duty != last_logged_duty) {
+                    ESP_LOGI(TAG, "MotorTask: OFF");
+                    last_logged_duty = target_duty;
+                }
+            }
+            else if (events & TOUCH2_PRESSED_EVENT) {
+                if (target_duty > 10) {
+                    target_duty -= 10;
+                } else {
+                    target_duty = 0;
+                }
+                ESP_LOGI(TAG, "MotorTask: Increase speed (%d%%)", 100 - target_duty);
+                last_logged_duty = target_duty;
+            }
+            
+            if (target_duty <= 100) {
+                instance->SetMotorDutyCycle(target_duty);
+            }
+        }
+    }
+
+
+
     // 读取雷达传感器状态
     bool ReadRadarSensor()
     {
@@ -295,21 +445,52 @@ private:
      void StartSensorMonitoring()
     {
         last_radar_state_ = ReadRadarSensor();
-        
-        // 读取 GPIO44 初始状态
         last_touch1_state_ = touch_sensor_1_.ReadGpioTouch();
-        
-        // 读取 GPIO9 初始值
         last_touch2_state_ = touch_sensor_2_.IsCapTouchDetected();
         
-        ESP_LOGI(TAG, "Initial sensor states - Radar: %d, Touch1 (GPIO%d): %s, Touch2 (GPIO9): %s", 
-                 last_radar_state_, 
-                 TOUCH_SENSOR_1_GPIO,
-                 last_touch1_state_ ? "TOUCHED" : "RELEASED",
-                 last_touch2_state_ ? "TOUCHED" : "RELEASED");
+        // 创建事件组
+        sensor_event_group_ = xEventGroupCreate();
         
+        // 启动音频任务（高优先级）
+        xTaskCreate(AudioTask, "audio_task", 4096, this, 8, &audio_task_handle_);
+        
+        // 启动电机任务（中高优先级）
+        xTaskCreate(MotorTask, "motor_task", 4096, this, 7, &motor_task_handle_);
+        
+        // 启动传感器监控任务（中优先级）
         xTaskCreate(SensorMonitorTask, "sensor_monitor", 4096, this, 5, NULL);
-        ESP_LOGI(TAG, "Sensor monitoring started");
+        
+        ESP_LOGI(TAG, "All sensor tasks started");
+    }
+
+    // Touch 1 按下处理
+    void HandleTouch1Pressed()
+    {
+        ESP_LOGI(TAG, ">>> Touch 1 PRESSED!");
+        
+        auto &app = Application::GetInstance();
+        app.PlaySound(Lang::Sounds::OGG_KUNKUN);
+        
+        SetMotorDutyCycle(50);
+        ESP_LOGI(TAG, ">>> Motor ON (50%% duty)");
+    }
+    
+    // Touch 1 释放处理
+    void HandleTouch1Released()
+    {
+        ESP_LOGI(TAG, ">>> Touch 1 RELEASED");
+        SetMotorDutyCycle(100);
+        ESP_LOGI(TAG, ">>> Motor OFF");
+    }
+    
+    // Touch 2 触摸处理
+    void HandleTouch2Touched()
+    {
+        uint32_t value = touch_sensor_2_.ReadCapTouchValue();
+        int32_t delta = (int32_t)value - (int32_t)touch_sensor_2_.GetBaseline();
+        ESP_LOGI(TAG, ">>> Touch 2 TOUCHED! Value: %" PRIu32 ", Delta: %" PRId32, value, delta);
+        
+        IncreaseMotorDutyCycle(10);
     }
 
 
@@ -367,7 +548,7 @@ private:
         InitializeMotorPwm();
         
         // 初始化触摸传感器
-        touch_sensor_1_.InitializeGpioTouch(TOUCH_SENSOR_1_GPIO);
+        InitializeTouch1Interrupt();
         touch_sensor_2_.InitializeCapTouch(TOUCH_SENSOR_2_CHANNEL, TOUCH_SENSOR_2_THRESHOLD_PERCENT);
 
         // 启动传感器监控任务
@@ -435,10 +616,18 @@ public:
             esp_timer_delete(check_idle_timer_);
         }
         
+        if (sensor_event_group_) {
+            vEventGroupDelete(sensor_event_group_);
+        }
+        
         if (i2c_bus_)
         {
             i2c_del_master_bus(i2c_bus_);
         }
+        
+        // 清理中断处理
+        gpio_isr_handler_remove((gpio_num_t)TOUCH_SENSOR_1_GPIO);
+  
     }
 };
 
