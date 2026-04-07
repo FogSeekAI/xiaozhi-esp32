@@ -116,10 +116,6 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 // 切换灯光状态
-                                 light_state_ = !light_state_;
-                                 SetLightState(light_state_);
-
                                  // 同时切换聊天状态（保持原有功能）
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）

@@ -501,7 +501,7 @@ void InitializeFragranceMCP(
                            std::string result = "{\"success\":true,\"level\":\"" + level + "\"}";
                            return result;
                        });
-}
+}*/
 
 void InitializeLightPanelMCP(
     McpServer &mcp_server,
@@ -524,4 +524,5 @@ void InitializeLightPanelMCP(
                                                   ",\"state\":" +
                                                   std::string(state ? "true" : "false") + "}";
                            return response;
-                       });*/
+                       });
+}
