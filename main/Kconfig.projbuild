@@ -218,6 +218,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_EDGE_ESP15F
         bool "Edge ESP15F"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_NANO_LCD_EYES
+        bool "NANO LCD Eyes"
+        depends on IDF_TARGET_ESP32S3    
     config BOARD_TYPE_ESP_KORVO2_V3
         bool "Espressif Korvo2 V3"
         depends on IDF_TARGET_ESP32S3

@@ -703,6 +703,11 @@ elseif(CONFIG_BOARD_TYPE_FOGSEEK_EDGE_ESP15F)
     set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
     set(BUILTIN_ICON_FONT font_awesome_16_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_32)
+elseif(CONFIG_BOARD_TYPE_FOGSEEK_NANO_LCD_EYES)
+    set(BOARD_TYPE "fogseek-nano-lcd_eyes")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
+    set(BUILTIN_ICON_FONT font_awesome_16_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_32)    
 endif()
 
 file(GLOB BOARD_SOURCES
@@ -850,7 +855,9 @@ if(CONFIG_IDF_TARGET_ESP32)
                              "display/lvgl_display/jpg/jpeg_to_image.c"
                              )
 endif()
-
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.c")
+    list(APPEND SOURCES "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.c")
+endif()
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
