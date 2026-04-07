@@ -38,6 +38,8 @@ choice
         bool "Chinese"
     config LANGUAGE_ZH_CN_XY
         bool "Chinese (AiYa)"
+    config LANGUAGE_ZH_CN_DDP
+        bool "Chinese (Dodopet)"
     config LANGUAGE_ZH_TW
         bool "Chinese Traditional"
     config LANGUAGE_EN_US
@@ -221,6 +223,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO_LCD_EYES
         bool "NANO LCD Eyes"
         depends on IDF_TARGET_ESP32S3    
+   config BOARD_TYPE_FOGSEEK_NANO_DODOPET
+        bool "Nano Dodopet"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ESP_KORVO2_V3
         bool "Espressif Korvo2 V3"
         depends on IDF_TARGET_ESP32S3
@@ -745,7 +750,7 @@ config USE_DEVICE_AEC
         || BOARD_TYPE_FOGSEEK_NANO_LINKBIT || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_LUMI || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_LUMI_4G || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_VISION || BOARD_TYPE_FOGSEEK_NANO_LINKBIT_VISION_4G \
         || BOARD_TYPE_FOGSEEK_NANO_SPIN || BOARD_TYPE_FOGSEEK_NANO_SPIN_4G || BOARD_TYPE_FOGSEEK_NANO_XIAOYA || BOARD_TYPE_FOGSEEK_NANO_MISTLIGHT || BOARD_TYPE_FOGSEEK_NANO_GLOWBIES \
         || BOARD_TYPE_FOGSEEK_EDGE_LINKBIT_LUMI \
-        || BOARD_TYPE_FOGSEEK_EDGE || BOARD_TYPE_FOGSEEK_EDGE_LCD1_8 || BOARD_TYPE_FOGSEEK_EDGE_ESP15F )
+        || BOARD_TYPE_FOGSEEK_EDGE || BOARD_TYPE_FOGSEEK_EDGE_LCD1_8 || BOARD_TYPE_FOGSEEK_EDGE_ESP15F || BOARD_TYPE_FOGSEEK_NANO_DODOPET )
     help
         To work properly, device-side AEC requires a clean output reference path from the speaker signal and physical acoustic isolation between the microphone and speaker.
 

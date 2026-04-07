@@ -5,6 +5,7 @@ import zipfile
 import argparse
 from pathlib import Path
 from typing import Optional, Union
+from typing import List, Dict
 
 # Switch to project root directory
 os.chdir(Path(__file__).resolve().parent.parent)
@@ -64,13 +65,14 @@ def zip_bin(name: str, version: str) -> None:
 _BOARDS_DIR = Path("main/boards")
 
 
-def _collect_variants(config_filename: str = "config.json") -> list[dict[str, str]]:
+
+def _collect_variants(config_filename: str = "config.json") -> List[Dict[str, str]]:
     """Traverse all boards under main/boards, collect variant information.
 
     Return example:
         [{"board": "bread-compact-ml307", "name": "bread-compact-ml307"}, ...]
     """
-    variants: list[dict[str, str]] = []
+    variants: List[Dict[str, str]] = []
     for board_path in _BOARDS_DIR.iterdir():
         if not board_path.is_dir():
             continue
@@ -90,10 +92,10 @@ def _collect_variants(config_filename: str = "config.json") -> list[dict[str, st
     return variants
 
 
-def _parse_board_config_map() -> dict[str, str]:
+def _parse_board_config_map() -> Dict[str, str]:
     """Build the mapping of CONFIG_BOARD_TYPE_xxx and board_type from main/CMakeLists.txt"""
     cmake_file = Path("main/CMakeLists.txt")
-    mapping: dict[str, str] = {}
+    mapping: Dict[str, str] = {}
     lines = cmake_file.read_text(encoding="utf-8").splitlines()
     for idx, line in enumerate(lines):
         if "if(CONFIG_BOARD_TYPE_" in line:
@@ -117,7 +119,7 @@ def _find_board_config(board_type: str) -> Optional[str]:
 # Kconfig "select" entries are not automatically applied when we simply append
 # sdkconfig lines from config.json, so add the required dependencies here to
 # mimic menuconfig behaviour.
-_AUTO_SELECT_RULES: dict[str, list[str]] = {
+_AUTO_SELECT_RULES: Dict[str, List[str]] = {
     "CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING": [
         "CONFIG_BT_ENABLED=y",
         "CONFIG_BT_BLUEDROID_ENABLED=y",
@@ -129,9 +131,9 @@ _AUTO_SELECT_RULES: dict[str, list[str]] = {
 }
 
 
-def _apply_auto_selects(sdkconfig_append: list[str]) -> list[str]:
+def _apply_auto_selects(sdkconfig_append: List[str]) -> List[str]:
     """Apply hardcoded auto-select rules to sdkconfig_append."""
-    items: list[str] = []
+    items: List[str] = []
     existing_keys: set[str] = set()
 
     def _append_if_missing(entry: str) -> None:
