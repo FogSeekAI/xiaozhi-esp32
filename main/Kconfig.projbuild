@@ -157,6 +157,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO
         bool "Fogseek Nano"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_NANO_TOY
+        bool "Fogseek Nano Toy"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_KIT
         bool "Fogseek Nano-Kit"
         depends on IDF_TARGET_ESP32S3
