@@ -22,9 +22,9 @@
 #include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
 #include <esp_task_wdt.h>
 #include <esp_event.h>
-#define TAG "FogSeekNanoLcd_Eyes"
+#define TAG "FogSeekNanoLcdEyes"
 
-class FogSeekNanoLcd_Eyes : public WifiBoard
+class FogSeekNanoLcdEyes : public WifiBoard
 {
 private:
     Button boot_button_;
@@ -37,8 +37,8 @@ private:
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
 
-    SpiLcdDisplay* display_1=nullptr;
-    SpiLcdDisplay* display_2=nullptr;
+    SpiLcdDisplay *display_1 = nullptr;
+    SpiLcdDisplay *display_2 = nullptr;
     // 初始化I2C外设
     void InitializeI2c()
     {
@@ -81,11 +81,11 @@ private:
     void InitializeDisplayManager()
     {
         esp_log_level_set("lcd", ESP_LOG_DEBUG);
-        //esp_task_wdt_deinit();
+        // esp_task_wdt_deinit();
 
         esp_lcd_panel_io_handle_t panel_io_1 = nullptr;
         esp_lcd_panel_handle_t panel_1 = nullptr;
-        
+
         ESP_ERROR_CHECK(esp_event_loop_create_default());
 
         spi_bus_config_t buscfg = {};
@@ -101,7 +101,7 @@ private:
         io_config_1.cs_gpio_num = DISPLAY_SPI_CS_GPIO;
         io_config_1.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
         io_config_1.spi_mode = 0;
-        io_config_1.pclk_hz = 40* 1000 * 1000;
+        io_config_1.pclk_hz = 40 * 1000 * 1000;
         io_config_1.trans_queue_depth = 10;
         io_config_1.lcd_cmd_bits = 8;
         io_config_1.lcd_param_bits = 8;
@@ -112,15 +112,15 @@ private:
         panel_config_1.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
         panel_config_1.bits_per_pixel = 16;
         ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_1, &panel_config_1, &panel_1));
-        
+
         esp_lcd_panel_reset(panel_1);
         esp_lcd_panel_init(panel_1);
-        esp_lcd_panel_disp_on_off(panel_1, true);     // 打开显示
+        esp_lcd_panel_disp_on_off(panel_1, true); // 打开显示
 
         display_1 = new SpiLcdDisplay(panel_io_1, panel_1,
-                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, 
-                                    DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
-                                    DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+                                      DISPLAY_WIDTH, DISPLAY_HEIGHT,
+                                      DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
+                                      DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
     // 初始化音频功放引脚并默认关闭功放
@@ -193,7 +193,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNanoLcd_Eyes *>(arg);
+                auto instance = static_cast<FogSeekNanoLcdEyes *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -236,7 +236,7 @@ private:
     }
 
 public:
-    FogSeekNanoLcd_Eyes() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekNanoLcdEyes() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
@@ -274,7 +274,7 @@ public:
         return &audio_codec;
     }
 
-    ~FogSeekNanoLcd_Eyes()
+    ~FogSeekNanoLcdEyes()
     {
         if (i2c_bus_)
         {
@@ -283,4 +283,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekNanoLcd_Eyes);
+DECLARE_BOARD(FogSeekNanoLcdEyes);

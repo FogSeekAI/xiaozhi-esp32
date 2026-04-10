@@ -28,6 +28,7 @@ private:
     TCA6408APowerManager *power_manager_;
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
+    esp_timer_handle_t button_monitor_timer_ = nullptr;
 
     void InitializeI2c()
     {
@@ -69,8 +70,8 @@ private:
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGE_DONE_GPIO, TCA6408A_DIR_INPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGING_GPIO, TCA6408A_DIR_INPUT);
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, 1);
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
+        // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, 1);
+        // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
         // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, 1);
 
         ESP_LOGI(TAG, "TCA6408A initialized successfully");
@@ -124,13 +125,58 @@ private:
                                       // 切换电源状态
                                       if (state)
                                       {
-                                        PowerOn();
+                                          PowerOn();
                                       }
                                       else
                                       {
-                                        PowerOff();
+                                          PowerOff();
                                       } });
         ESP_LOGI(TAG, "Control button initialized on P%d", TCA6408A_CTRL_BUTTON_GPIO);
+    }
+
+    // 定时器回调：每秒打印按键电平状态
+    static void ButtonMonitorTimerCallback(void *arg)
+    {
+        auto instance = static_cast<FogSeekEdge *>(arg);
+        uint8_t level;
+        esp_err_t ret = tca6408a_get_gpio_level(&instance->tca6408a_handle_, TCA6408A_CTRL_BUTTON_GPIO, &level);
+        if (ret == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Button P%d level: %d (%s)", TCA6408A_CTRL_BUTTON_GPIO, level, level == 0 ? "PRESSED" : "RELEASED");
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Failed to read button level: %d", ret);
+        }
+    }
+
+    // 初始化按钮监控定时器
+    void InitializeButtonMonitor()
+    {
+        esp_timer_create_args_t timer_args = {};
+        timer_args.callback = ButtonMonitorTimerCallback;
+        timer_args.arg = this;
+        timer_args.dispatch_method = ESP_TIMER_TASK;
+        timer_args.name = "button_monitor_timer";
+        
+        esp_err_t ret = esp_timer_create(&timer_args, &button_monitor_timer_);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to create button monitor timer: %d", ret);
+            return;
+        }
+
+        // 启动周期性定时器，间隔1秒（1000000微秒）
+        ret = esp_timer_start_periodic(button_monitor_timer_, 1000000);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to start button monitor timer: %d", ret);
+            esp_timer_delete(button_monitor_timer_);
+            button_monitor_timer_ = nullptr;
+            return;
+        }
+
+        ESP_LOGI(TAG, "Button monitor timer started (interval: 1s)");
     }
 
     // 处理自动唤醒逻辑
@@ -174,22 +220,22 @@ private:
     {
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, 1);
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, 1);
-        // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
+        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
 
         ESP_LOGI(TAG, "Device powered on.");
 
-        // HandleAutoWake(); // 开机自动唤醒
+        HandleAutoWake(); // 开机自动唤醒
     }
 
     // 关机流程
     void PowerOff()
     {
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, 0);
-        // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 0);
+        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 0);
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, 0);
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, 0);
 
-        // Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
+        Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
 
         ESP_LOGI(TAG, "Device powered off.");
     }
@@ -205,6 +251,7 @@ public:
         InitializeInterruptManager();
         InitializePowerManager();
         InitializeCtrlButton();
+        InitializeButtonMonitor();
     }
 
     virtual AudioCodec *GetAudioCodec() override
@@ -227,6 +274,14 @@ public:
 
     ~FogSeekEdge()
     {
+        // 停止并删除按钮监控定时器
+        if (button_monitor_timer_)
+        {
+            esp_timer_stop(button_monitor_timer_);
+            esp_timer_delete(button_monitor_timer_);
+            button_monitor_timer_ = nullptr;
+        }
+
         if (power_manager_)
         {
             delete power_manager_;

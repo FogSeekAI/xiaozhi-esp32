@@ -42,7 +42,7 @@ void FragranceController::SetMode(Mode mode)
         is_running_ = false;
         // 确保所有设备都停止
         // led_controller_.StopBreathingEffect();
-        motor_controller_.ControlMotor(false);
+        motor_controller_.ControlIOMotor(false);
     }
 }
 
@@ -55,7 +55,7 @@ void FragranceController::SetIntensityHigh()
     active_duration_ = 10000; // 10秒
 
     // 使用电机控制器的定时功能运行电机
-    motor_controller_.RunMotorTimed(active_duration_);
+    motor_controller_.RunIOMotorTimed(active_duration_);
 
     ESP_LOGI(FRAGRANCE_TAG, "Fragrance intensity set to HIGH: run %d ms", active_duration_);
 }
@@ -69,7 +69,7 @@ void FragranceController::SetIntensityLow()
     active_duration_ = 3000; // 3秒
 
     // 使用电机控制器的定时功能运行电机
-    motor_controller_.RunMotorTimed(active_duration_);
+    motor_controller_.RunIOMotorTimed(active_duration_);
 
     ESP_LOGI(FRAGRANCE_TAG, "Fragrance intensity set to LOW: run %d ms", active_duration_);
 }
@@ -172,7 +172,7 @@ void FragranceController::StopCurrentMode()
     // led_controller_.TurnOffRgbLights(100);
 
     // 停止电机
-    motor_controller_.ControlMotor(false);
+    motor_controller_.ControlIOMotor(false);
 }
 
 void FragranceController::SetWorkModeParams()

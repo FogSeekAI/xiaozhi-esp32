@@ -55,6 +55,25 @@ void TCA6408AButton::Initialize(TCA6408AInterruptManager *interrupt_manager)
 
     interrupt_manager->RegisterInputPin(gpio_, callback);
 
+    // 检查初始化时按键是否已经按下，处理开机时按键已按下的场景
+    uint8_t initial_level;
+    esp_err_t err = tca6408a_get_gpio_level(tca6408a_handle_, gpio_, &initial_level);
+    if (err == ESP_OK)
+    {
+        bool initially_pressed = active_low_ ? (initial_level == 0) : (initial_level == 1);
+        if (initially_pressed)
+        {
+            ESP_LOGI(TAG, "Button P%d is already pressed at initialization", gpio_);
+            is_pressed_ = true;
+            esp_timer_start_once(timer_, LONG_PRESS_TIME_MS * 1000);
+            
+            if (on_press_down_)
+            {
+                on_press_down_();
+            }
+        }
+    }
+
     ESP_LOGI(TAG, "Initialized on P%d, active_%s", gpio_, active_low_ ? "low" : "high");
 }
 

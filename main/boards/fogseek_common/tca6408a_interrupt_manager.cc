@@ -52,15 +52,23 @@ void TCA6408AInterruptManager::RegisterInputPin(tca6408a_gpio_t gpio, InputPinCa
         return;
     }
 
+    uint8_t current_level;
+    esp_err_t ret = tca6408a_get_gpio_level(tca6408a_handle_, gpio, &current_level);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Failed to read initial level for P%d, defaulting to 1", gpio);
+        current_level = 1;
+    }
+
     InputPinConfig config = {
         .gpio = gpio,
         .callback = callback,
-        .last_level = 1,
+        .last_level = current_level,
         .enabled = true};
 
     input_pins_[gpio] = config;
 
-    ESP_LOGI(TAG, "Registered input pin P%d", gpio);
+    ESP_LOGI(TAG, "Registered input pin P%d, initial level: %d", gpio, current_level);
 }
 
 void TCA6408AInterruptManager::UnregisterInputPin(tca6408a_gpio_t gpio)
