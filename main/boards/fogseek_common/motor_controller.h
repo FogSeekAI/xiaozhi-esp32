@@ -31,6 +31,16 @@ public:
     // 定时运行电机，运行指定时间后停止
     void RunMotorTimed(uint32_t run_time_ms);
 
+    // PWM电机控制相关方法（占空比控制）
+    void InitializePwmMotor(gpio_num_t motor_gpio, uint32_t freq_hz = 5000);
+    void SetMotorDutyCycle(uint8_t percentage);
+    void IncreaseMotorDutyCycle(uint8_t increment);
+    void DecreaseMotorDutyCycle(uint8_t decrement);
+    void StopMotor();
+    bool IsPwmMotorInitialized() const { return pwm_motor_initialized_; }
+    uint8_t GetCurrentDutyCycle() const { return current_duty_cycle_; }
+
+
 private:
 
     // 舵机相关属性
@@ -47,6 +57,13 @@ private:
 
     // 用于存储定时参数
     uint32_t run_time_ms_;
+
+    // PWM电机相关属性
+    gpio_num_t pwm_motor_gpio_;
+    bool pwm_motor_initialized_;
+    ledc_channel_t pwm_channel_;
+    ledc_timer_t pwm_timer_;
+    uint8_t current_duty_cycle_;  // 当前占空比 (0-100)
 };
 
 #endif // _MOTOR_CONTROLLER_H_

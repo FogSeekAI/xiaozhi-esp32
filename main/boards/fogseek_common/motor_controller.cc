@@ -14,7 +14,12 @@ FogSeekMotorController::FogSeekMotorController() : servo_gpio_(GPIO_NUM_NC),
                                                    motor_gpio_(GPIO_NUM_NC),
                                                    motor_initialized_(false), 
                                                    motor_timer_handle_(nullptr),
-                                                   run_time_ms_(0) {}
+                                                   run_time_ms_(0) ,
+                                                   pwm_motor_gpio_(GPIO_NUM_NC),
+                                                   pwm_motor_initialized_(false),
+                                                   pwm_channel_(LEDC_CHANNEL_1),
+                                                   pwm_timer_(LEDC_TIMER_1),
+                                                   current_duty_cycle_(0) {}
 
 FogSeekMotorController::~FogSeekMotorController()
 {
@@ -25,6 +30,9 @@ FogSeekMotorController::~FogSeekMotorController()
     
     if (motor_timer_handle_ != nullptr) {
         esp_timer_delete(motor_timer_handle_);
+    }
+    if (pwm_motor_initialized_) {
+        ledc_stop(LEDC_LOW_SPEED_MODE, pwm_channel_, 0);
     }
 }
 
@@ -164,4 +172,102 @@ void FogSeekMotorController::RunMotorTimed(uint32_t run_time_ms)
     } else {
         ESP_LOGI(TAG, "Motor started for %d ms (single run, no loop)", run_time_ms);
     }
+}
+
+void FogSeekMotorController::InitializePwmMotor(gpio_num_t motor_gpio, uint32_t freq_hz)
+{
+    pwm_motor_gpio_ = motor_gpio;
+    
+    gpio_reset_pin(pwm_motor_gpio_);
+    gpio_set_direction(pwm_motor_gpio_, GPIO_MODE_OUTPUT);
+    gpio_set_level(pwm_motor_gpio_, 0);
+    
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_12_BIT,
+        .timer_num = pwm_timer_,
+        .freq_hz = freq_hz,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    
+    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+    
+    ledc_channel_config_t ledc_channel = {
+        .gpio_num = pwm_motor_gpio_,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = pwm_channel_,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = pwm_timer_,
+        .duty = 0,
+        .hpoint = 0,
+        .flags = {
+            .output_invert = 0,
+        },
+    };
+    
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+    
+    current_duty_cycle_ = 0;
+    pwm_motor_initialized_ = true;
+    
+    ESP_LOGI(TAG, "PWM motor initialized on GPIO %d, freq: %d Hz", pwm_motor_gpio_, freq_hz);
+}
+
+void FogSeekMotorController::SetMotorDutyCycle(uint8_t percentage)
+{
+    if (!pwm_motor_initialized_) {
+        ESP_LOGE(TAG, "PWM motor not initialized");
+        return;
+    }
+    
+    if (percentage > 100) {
+        percentage = 100;
+    }
+    
+    if (current_duty_cycle_ != percentage) {
+        current_duty_cycle_ = percentage;
+        
+        uint32_t duty_value = (percentage * 4095) / 100;
+        
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, pwm_channel_, duty_value);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, pwm_channel_);
+        
+        ESP_LOGI(TAG, "PWM motor duty cycle set to %d%% (%d)", percentage, duty_value);
+    }
+}
+
+void FogSeekMotorController::IncreaseMotorDutyCycle(uint8_t increment)
+{
+    if (!pwm_motor_initialized_) {
+        ESP_LOGE(TAG, "PWM motor not initialized");
+        return;
+    }
+    
+    uint8_t new_percentage = current_duty_cycle_ + increment;
+    if (new_percentage > 100) {
+        new_percentage = 100;
+    }
+    
+    SetMotorDutyCycle(new_percentage);
+}
+
+void FogSeekMotorController::DecreaseMotorDutyCycle(uint8_t decrement)
+{
+    if (!pwm_motor_initialized_) {
+        ESP_LOGE(TAG, "PWM motor not initialized");
+        return;
+    }
+    
+    int new_percentage = (int)current_duty_cycle_ - (int)decrement;
+    if (new_percentage < 0) {
+        new_percentage = 0;
+    }
+    
+    SetMotorDutyCycle((uint8_t)new_percentage);
+}
+
+void FogSeekMotorController::StopMotor()
+{
+    SetMotorDutyCycle(0);
+    ESP_LOGI(TAG, "PWM motor stopped");
 }
