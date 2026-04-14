@@ -202,14 +202,14 @@ private:
                 instance->last_radar_state_ = radar_state;
                 if (radar_state)
                 {
-                    // // 检测到物体，播放提示音
-                    // auto &app = Application::GetInstance();
-                    // app.PlaySound(Lang::Sounds::OGG_WELCOME);
-                    // ESP_LOGI(TAG, ">>> Radar: Object detected");
+                    // 检测到物体，播放提示音
+                    auto &app = Application::GetInstance();
+                    app.PlaySound(Lang::Sounds::OGG_WELCOME);
+                    ESP_LOGI(TAG, ">>> Radar: Object detected");
                 }
                 else
                 {
-                    // ESP_LOGI(TAG, ">>> Radar: No object detected");
+                    ESP_LOGI(TAG, ">>> Radar: No object detected");
                 }
             }
 
@@ -292,27 +292,17 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 //  auto &app = Application::GetInstance();
-                                 //  app.ToggleChatState();                   // 切换聊天状态（打断）
-                                 //  motor_controller_.SetMotorDutyCycle(50); // 点击时关闭电机
-                                last_radar_state_ = ReadRadarSensor();
-
-        // 读取 GPIO44 初始状态
-        last_touch_state_ = touch_sensor_.ReadGpioTouch();
-
-        ESP_LOGI(TAG, "Initial sensor states - Radar: %d, Touch (GPIO%d): %s",
-                 last_radar_state_,
-                 TOUCH_SENSOR_GPIO,
-                 last_touch_state_ ? "TOUCHED" : "RELEASED"); });
+                                 auto &app = Application::GetInstance();
+                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                             });
         ctrl_button_.OnDoubleClick([this]()
                                    {
-                                    motor_controller_.SetMotorDutyCycle(0); // 点击时关闭电机
-            auto &app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting)
-            {
-                EnterWifiConfigMode();
-                return;
-            } });
+                                        auto &app = Application::GetInstance();
+                                        if (app.GetDeviceState() == kDeviceStateStarting)
+                                        {
+                                            EnterWifiConfigMode();
+                                            return;
+                                        } });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态

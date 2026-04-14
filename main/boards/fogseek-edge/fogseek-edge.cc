@@ -70,9 +70,6 @@ private:
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGE_DONE_GPIO, TCA6408A_DIR_INPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGING_GPIO, TCA6408A_DIR_INPUT);
-        // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, 1);
-        // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
-        // tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, 1);
 
         ESP_LOGI(TAG, "TCA6408A initialized successfully");
     }
@@ -105,18 +102,25 @@ private:
 
         ctrl_button_->OnClick([this]()
                               {
-            ESP_LOGI(TAG, "Clicked - RED LED on");
-            static bool state = false;
-            state = !state;
-            tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, state ? 1 : 0); });
+                                auto &app = Application::GetInstance();
+                                app.ToggleChatState(); // 切换聊天状态（打断）
+                                ESP_LOGI(TAG, "Clicked - RED LED on");
+                                static bool state = false;
+                                state = !state;
+                                tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, state ? 1 : 0); });
 
         ctrl_button_->OnDoubleClick([this]()
                                     {
-            ESP_LOGI(TAG, "Double clicked - Toggle GREEN LED");
-            static bool state = false;
-            state = !state;
-            tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, state ? 1 : 0); });
-
+                                        ESP_LOGI(TAG, "Double clicked - Toggle GREEN LED");
+                                        static bool state = false;
+                                        state = !state;
+                                        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, state ? 1 : 0); 
+                                        auto &app = Application::GetInstance();
+                                        if (app.GetDeviceState() == kDeviceStateStarting)
+                                        {
+                                            EnterWifiConfigMode();
+                                            return;
+                                        } });
         ctrl_button_->OnLongPress([this]()
                                   {
                                       ESP_LOGI(TAG, "On Long Press");
@@ -132,51 +136,6 @@ private:
                                           PowerOff();
                                       } });
         ESP_LOGI(TAG, "Control button initialized on P%d", TCA6408A_CTRL_BUTTON_GPIO);
-    }
-
-    // 定时器回调：每秒打印按键电平状态
-    static void ButtonMonitorTimerCallback(void *arg)
-    {
-        auto instance = static_cast<FogSeekEdge *>(arg);
-        uint8_t level;
-        esp_err_t ret = tca6408a_get_gpio_level(&instance->tca6408a_handle_, TCA6408A_CTRL_BUTTON_GPIO, &level);
-        if (ret == ESP_OK)
-        {
-            ESP_LOGI(TAG, "Button P%d level: %d (%s)", TCA6408A_CTRL_BUTTON_GPIO, level, level == 0 ? "PRESSED" : "RELEASED");
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to read button level: %d", ret);
-        }
-    }
-
-    // 初始化按钮监控定时器
-    void InitializeButtonMonitor()
-    {
-        esp_timer_create_args_t timer_args = {};
-        timer_args.callback = ButtonMonitorTimerCallback;
-        timer_args.arg = this;
-        timer_args.dispatch_method = ESP_TIMER_TASK;
-        timer_args.name = "button_monitor_timer";
-        
-        esp_err_t ret = esp_timer_create(&timer_args, &button_monitor_timer_);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to create button monitor timer: %d", ret);
-            return;
-        }
-
-        // 启动周期性定时器，间隔1秒（1000000微秒）
-        ret = esp_timer_start_periodic(button_monitor_timer_, 1000000);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to start button monitor timer: %d", ret);
-            esp_timer_delete(button_monitor_timer_);
-            button_monitor_timer_ = nullptr;
-            return;
-        }
-
-        ESP_LOGI(TAG, "Button monitor timer started (interval: 1s)");
     }
 
     // 处理自动唤醒逻辑
@@ -251,7 +210,6 @@ public:
         InitializeInterruptManager();
         InitializePowerManager();
         InitializeCtrlButton();
-        InitializeButtonMonitor();
     }
 
     virtual AudioCodec *GetAudioCodec() override
