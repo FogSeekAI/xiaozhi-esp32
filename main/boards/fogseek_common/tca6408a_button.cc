@@ -2,21 +2,21 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 
-#define TAG "TCA6408AButton"
+#define TAG "Tca6408aButton"
 #define LONG_PRESS_TIME_MS 2000
 #define DOUBLE_CLICK_TIME_MS 300
 
-TCA6408AButton::TCA6408AButton(tca6408a_handle_t *tca6408a_handle, tca6408a_gpio_t gpio, bool active_low)
-    : tca6408a_handle_(tca6408a_handle),
-      gpio_(gpio),
-      active_low_(active_low),
+Tca6408aButton::Tca6408aButton()
+    : tca6408a_handle_(nullptr),
+      gpio_(TCA6408A_GPIO_P0),
+      active_low_(true),
       is_pressed_(false),
       click_count_(0),
       timer_(nullptr)
 {
 }
 
-TCA6408AButton::~TCA6408AButton()
+Tca6408aButton::~Tca6408aButton()
 {
     if (timer_)
     {
@@ -24,11 +24,18 @@ TCA6408AButton::~TCA6408AButton()
     }
 }
 
-void TCA6408AButton::Initialize(TCA6408AInterruptManager *interrupt_manager)
+void Tca6408aButton::Initialize(tca6408a_handle_t *tca6408a_handle, tca6408a_gpio_t gpio, bool active_low)
 {
-    if (!interrupt_manager)
+    tca6408a_handle_ = tca6408a_handle;
+    gpio_ = gpio;
+    active_low_ = active_low;
+}
+
+void Tca6408aButton::Initialize(Tca6408aInterruptManager *interrupt_manager)
+{
+    if (!interrupt_manager || !tca6408a_handle_)
     {
-        ESP_LOGE(TAG, "Invalid interrupt manager");
+        ESP_LOGE(TAG, "Invalid interrupt manager or handle");
         return;
     }
 
@@ -77,7 +84,7 @@ void TCA6408AButton::Initialize(TCA6408AInterruptManager *interrupt_manager)
     ESP_LOGI(TAG, "Initialized on P%d, active_%s", gpio_, active_low_ ? "low" : "high");
 }
 
-void TCA6408AButton::HandleStateChange(uint8_t level)
+void Tca6408aButton::HandleStateChange(uint8_t level)
 {
     bool pressed = active_low_ ? (level == 0) : (level == 1);
 
@@ -122,9 +129,9 @@ void TCA6408AButton::HandleStateChange(uint8_t level)
     }
 }
 
-void TCA6408AButton::TimerCallback(void *arg)
+void Tca6408aButton::TimerCallback(void *arg)
 {
-    auto btn = static_cast<TCA6408AButton *>(arg);
+    auto btn = static_cast<Tca6408aButton *>(arg);
 
     if (btn->is_pressed_)
     {
@@ -133,6 +140,8 @@ void TCA6408AButton::TimerCallback(void *arg)
         {
             btn->on_long_press_();
         }
+        // 长按触发后重置点击计数，避免松开时触发单击
+        btn->click_count_ = 0;
     }
     else if (btn->click_count_ == 1)
     {
@@ -145,27 +154,27 @@ void TCA6408AButton::TimerCallback(void *arg)
     }
 }
 
-void TCA6408AButton::OnPressDown(std::function<void()> callback)
+void Tca6408aButton::OnPressDown(std::function<void()> callback)
 {
     on_press_down_ = callback;
 }
 
-void TCA6408AButton::OnPressUp(std::function<void()> callback)
+void Tca6408aButton::OnPressUp(std::function<void()> callback)
 {
     on_press_up_ = callback;
 }
 
-void TCA6408AButton::OnClick(std::function<void()> callback)
+void Tca6408aButton::OnClick(std::function<void()> callback)
 {
     on_click_ = callback;
 }
 
-void TCA6408AButton::OnDoubleClick(std::function<void()> callback)
+void Tca6408aButton::OnDoubleClick(std::function<void()> callback)
 {
     on_double_click_ = callback;
 }
 
-void TCA6408AButton::OnLongPress(std::function<void()> callback)
+void Tca6408aButton::OnLongPress(std::function<void()> callback)
 {
     on_long_press_ = callback;
 }

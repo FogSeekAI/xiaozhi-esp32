@@ -24,7 +24,7 @@ enum class DevicePowerState
     CHARGING
 };
 
-class TCA6408APowerManager
+class Tca6408aPowerManager
 {
 public:
     struct power_pin_config_t
@@ -37,8 +37,8 @@ public:
 
     using PowerStateCallback = std::function<void(PowerState)>;
 
-    TCA6408APowerManager();
-    ~TCA6408APowerManager();
+    Tca6408aPowerManager();
+    ~Tca6408aPowerManager();
 
     void Initialize(tca6408a_handle_t *tca6408a_handle, const power_pin_config_t *pin_config);
     void PowerOn();

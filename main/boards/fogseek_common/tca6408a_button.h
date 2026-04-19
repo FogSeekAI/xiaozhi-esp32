@@ -7,13 +7,14 @@
 #include <functional>
 #include <esp_timer.h>
 
-class TCA6408AButton
+class Tca6408aButton
 {
 public:
-    TCA6408AButton(tca6408a_handle_t *tca6408a_handle, tca6408a_gpio_t gpio, bool active_low = true);
-    ~TCA6408AButton();
+    Tca6408aButton();
+    ~Tca6408aButton();
 
-    void Initialize(TCA6408AInterruptManager *interrupt_manager);
+    void Initialize(tca6408a_handle_t *tca6408a_handle, tca6408a_gpio_t gpio, bool active_low = true);
+    void Initialize(Tca6408aInterruptManager *interrupt_manager);
 
     void OnPressDown(std::function<void()> callback);
     void OnPressUp(std::function<void()> callback);
@@ -25,13 +26,13 @@ private:
     void HandleStateChange(uint8_t level);
     static void TimerCallback(void *arg);
 
-    tca6408a_handle_t *tca6408a_handle_;
-    tca6408a_gpio_t gpio_;
-    bool active_low_;
-    bool is_pressed_;
-    uint8_t click_count_;
+    tca6408a_handle_t *tca6408a_handle_ = nullptr;
+    tca6408a_gpio_t gpio_ = TCA6408A_GPIO_P0;
+    bool active_low_ = true;
+    bool is_pressed_ = false;
+    uint8_t click_count_ = 0;
 
-    esp_timer_handle_t timer_;
+    esp_timer_handle_t timer_ = nullptr;
     std::function<void()> on_press_down_;
     std::function<void()> on_press_up_;
     std::function<void()> on_click_;

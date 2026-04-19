@@ -4,9 +4,9 @@
 #include "application.h"
 #include "assets/lang_config.h"
 
-const char *TCA6408APowerManager::TAG = "TCA6408APowerMgr";
+const char *Tca6408aPowerManager::TAG = "Tca6408aPowerMgr";
 
-TCA6408APowerManager::TCA6408APowerManager()
+Tca6408aPowerManager::Tca6408aPowerManager()
     : tca6408a_handle_(nullptr),
       power_state_(PowerState::NO_POWER),
       device_power_state_(DevicePowerState::CHARGING),
@@ -18,7 +18,7 @@ TCA6408APowerManager::TCA6408APowerManager()
 {
 }
 
-TCA6408APowerManager::~TCA6408APowerManager()
+Tca6408aPowerManager::~Tca6408aPowerManager()
 {
     if (battery_check_timer_)
     {
@@ -34,7 +34,7 @@ TCA6408APowerManager::~TCA6408APowerManager()
     }
 }
 
-void TCA6408APowerManager::Initialize(tca6408a_handle_t *tca6408a_handle, const power_pin_config_t *pin_config)
+void Tca6408aPowerManager::Initialize(tca6408a_handle_t *tca6408a_handle, const power_pin_config_t *pin_config)
 {
     if (!tca6408a_handle || !pin_config)
     {
@@ -78,7 +78,7 @@ void TCA6408APowerManager::Initialize(tca6408a_handle_t *tca6408a_handle, const 
 
     // 创建电源状态检查定时器
     esp_timer_create_args_t timer_args = {
-        .callback = &TCA6408APowerManager::PowerStateUpdateTimerCallback,
+        .callback = &Tca6408aPowerManager::PowerStateUpdateTimerCallback,
         .arg = this,
         .name = "tca6408a_power_state_timer"};
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &battery_check_timer_));
@@ -87,7 +87,7 @@ void TCA6408APowerManager::Initialize(tca6408a_handle_t *tca6408a_handle, const 
     ESP_LOGI(TAG, "TCA6408A Power Manager initialized");
 }
 
-void TCA6408APowerManager::PowerOn()
+void Tca6408aPowerManager::PowerOn()
 {
     SetPowerState(true);
     tca6408a_set_gpio_level(tca6408a_handle_, pin_config_.hold_gpio, 1);
@@ -95,7 +95,7 @@ void TCA6408APowerManager::PowerOn()
     ESP_LOGI(TAG, "Power ON");
 }
 
-void TCA6408APowerManager::PowerOff()
+void Tca6408aPowerManager::PowerOff()
 {
     SetPowerState(false);
     tca6408a_set_gpio_level(tca6408a_handle_, pin_config_.hold_gpio, 0);
@@ -111,12 +111,12 @@ void TCA6408APowerManager::PowerOff()
     ESP_LOGI(TAG, "Power OFF");
 }
 
-uint8_t TCA6408APowerManager::ReadBatteryLevel()
+uint8_t Tca6408aPowerManager::ReadBatteryLevel()
 {
     return battery_monitor_->GetBatteryLevel();
 }
 
-void TCA6408APowerManager::UpdatePowerState()
+void Tca6408aPowerManager::UpdatePowerState()
 {
     battery_level_ = ReadBatteryLevel();
 
@@ -169,7 +169,7 @@ void TCA6408APowerManager::UpdatePowerState()
              battery_level_, p6_level, p7_level, static_cast<int>(power_state_));
 }
 
-void TCA6408APowerManager::CheckLowBattery()
+void Tca6408aPowerManager::CheckLowBattery()
 {
     battery_level_ = ReadBatteryLevel();
 
@@ -215,9 +215,9 @@ void TCA6408APowerManager::CheckLowBattery()
     }
 }
 
-void TCA6408APowerManager::PowerStateUpdateTimerCallback(void *arg)
+void Tca6408aPowerManager::PowerStateUpdateTimerCallback(void *arg)
 {
-    TCA6408APowerManager *self = static_cast<TCA6408APowerManager *>(arg);
+    Tca6408aPowerManager *self = static_cast<Tca6408aPowerManager *>(arg);
     self->CheckLowBattery();
     self->UpdatePowerState();
 }

@@ -1,19 +1,17 @@
 #include "tca6408a_interrupt_manager.h"
 #include <esp_log.h>
 
-#define TAG "TCA6408AIntMgr"
+#define TAG "Tca6408aIntMgr"
 
-TCA6408AInterruptManager::TCA6408AInterruptManager(
-    tca6408a_handle_t *tca6408a_handle,
-    gpio_num_t int_gpio)
-    : tca6408a_handle_(tca6408a_handle),
-      int_gpio_(int_gpio),
+Tca6408aInterruptManager::Tca6408aInterruptManager()
+    : tca6408a_handle_(nullptr),
+      int_gpio_(GPIO_NUM_NC),
       task_handle_(nullptr),
       last_input_state_(0xFF)
 {
 }
 
-TCA6408AInterruptManager::~TCA6408AInterruptManager()
+Tca6408aInterruptManager::~Tca6408aInterruptManager()
 {
     if (task_handle_)
     {
@@ -26,25 +24,35 @@ TCA6408AInterruptManager::~TCA6408AInterruptManager()
     }
 }
 
-void TCA6408AInterruptManager::Initialize()
+void Tca6408aInterruptManager::Initialize(tca6408a_handle_t *tca6408a_handle, gpio_num_t int_gpio)
 {
-    gpio_config_t io_conf;
+    tca6408a_handle_ = tca6408a_handle;
+    int_gpio_ = int_gpio;
+
+    if (!tca6408a_handle_ || int_gpio_ == GPIO_NUM_NC) {
+        ESP_LOGE(TAG, "Init failed: invalid handle or GPIO");
+        return;
+    }
+
+    gpio_config_t io_conf = {};
     io_conf.pin_bit_mask = (1ULL << int_gpio_);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.intr_type = GPIO_INTR_NEGEDGE;
-    io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
 
-    gpio_install_isr_service(ESP_INTR_FLAG_SHARED);
+    static bool isr_installed = false;
+    if (!isr_installed) {
+        gpio_install_isr_service(ESP_INTR_FLAG_SHARED);
+        isr_installed = true;
+    }
     gpio_isr_handler_add(int_gpio_, InterruptHandler, this);
 
     xTaskCreate(InterruptTask, "tca6408a_int_task", 2048, this, 10, &task_handle_);
-
-    ESP_LOGI(TAG, "TCA6408A interrupt manager initialized on GPIO%d", int_gpio_);
+    ESP_LOGI(TAG, "Initialized on GPIO%d", int_gpio_);
 }
 
-void TCA6408AInterruptManager::RegisterInputPin(tca6408a_gpio_t gpio, InputPinCallback callback)
+void Tca6408aInterruptManager::RegisterInputPin(tca6408a_gpio_t gpio, InputPinCallback callback)
 {
     if (gpio > TCA6408A_GPIO_P7)
     {
@@ -71,7 +79,7 @@ void TCA6408AInterruptManager::RegisterInputPin(tca6408a_gpio_t gpio, InputPinCa
     ESP_LOGI(TAG, "Registered input pin P%d, initial level: %d", gpio, current_level);
 }
 
-void TCA6408AInterruptManager::UnregisterInputPin(tca6408a_gpio_t gpio)
+void Tca6408aInterruptManager::UnregisterInputPin(tca6408a_gpio_t gpio)
 {
     auto it = input_pins_.find(gpio);
     if (it != input_pins_.end())
@@ -81,7 +89,7 @@ void TCA6408AInterruptManager::UnregisterInputPin(tca6408a_gpio_t gpio)
     }
 }
 
-void TCA6408AInterruptManager::EnableInputPin(tca6408a_gpio_t gpio)
+void Tca6408aInterruptManager::EnableInputPin(tca6408a_gpio_t gpio)
 {
     auto it = input_pins_.find(gpio);
     if (it != input_pins_.end())
@@ -91,7 +99,7 @@ void TCA6408AInterruptManager::EnableInputPin(tca6408a_gpio_t gpio)
     }
 }
 
-void TCA6408AInterruptManager::DisableInputPin(tca6408a_gpio_t gpio)
+void Tca6408aInterruptManager::DisableInputPin(tca6408a_gpio_t gpio)
 {
     auto it = input_pins_.find(gpio);
     if (it != input_pins_.end())
@@ -101,9 +109,9 @@ void TCA6408AInterruptManager::DisableInputPin(tca6408a_gpio_t gpio)
     }
 }
 
-void IRAM_ATTR TCA6408AInterruptManager::InterruptHandler(void *arg)
+void IRAM_ATTR Tca6408aInterruptManager::InterruptHandler(void *arg)
 {
-    auto instance = static_cast<TCA6408AInterruptManager *>(arg);
+    auto instance = static_cast<Tca6408aInterruptManager *>(arg);
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     xTaskNotifyFromISR(instance->task_handle_, 1, eSetValueWithoutOverwrite, &xHigherPriorityTaskWoken);
@@ -114,9 +122,9 @@ void IRAM_ATTR TCA6408AInterruptManager::InterruptHandler(void *arg)
     }
 }
 
-void TCA6408AInterruptManager::InterruptTask(void *arg)
+void Tca6408aInterruptManager::InterruptTask(void *arg)
 {
-    auto instance = static_cast<TCA6408AInterruptManager *>(arg);
+    auto instance = static_cast<Tca6408aInterruptManager *>(arg);
 
     while (true)
     {
@@ -134,7 +142,7 @@ void TCA6408AInterruptManager::InterruptTask(void *arg)
     }
 }
 
-uint8_t TCA6408AInterruptManager::ReadInputState()
+uint8_t Tca6408aInterruptManager::ReadInputState()
 {
     uint8_t level;
     esp_err_t ret = tca6408a_get_all_gpio_level(tca6408a_handle_, &level);
@@ -146,7 +154,7 @@ uint8_t TCA6408AInterruptManager::ReadInputState()
     return level;
 }
 
-void TCA6408AInterruptManager::HandleInputChange(uint8_t input_data)
+void Tca6408aInterruptManager::HandleInputChange(uint8_t input_data)
 {
     for (auto &pair : input_pins_)
     {
