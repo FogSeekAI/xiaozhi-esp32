@@ -166,6 +166,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_EDGE
         bool "Fogseek Edge"
         depends on IDF_TARGET_ESP32S3    
+    config BOARD_TYPE_FOGSEEK_EDGE_CAMERA
+        bool "Fogseek Edge-Camera"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_EDGE_LCD1_8
         bool "Fogseek Edge-LCD1.8"
         depends on IDF_TARGET_ESP32S3         
