@@ -184,7 +184,16 @@ private:
             },
         };
         esp_lcd_panel_io_handle_t tp_io_handle = NULL;
-        esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
+        esp_lcd_panel_io_i2c_config_t tp_io_config = {
+            .dev_addr = ESP_LCD_TOUCH_IO_I2C_FT5x06_ADDRESS,
+            .control_phase_bytes = 1,
+            .dc_bit_offset = 0,
+            .lcd_cmd_bits = 8,
+            .flags =
+            {
+                .disable_control_phase = 1,
+            }
+        };
         tp_io_config.scl_speed_hz = 400000;
 
         esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
@@ -230,7 +239,7 @@ private:
         config.pin_reset = CAMERA_PIN_RESET;
         config.xclk_freq_hz = XCLK_FREQ_HZ;
         config.pixel_format = PIXFORMAT_RGB565;
-        config.frame_size = FRAMESIZE_VGA;
+        config.frame_size = FRAMESIZE_QVGA;
         config.jpeg_quality = 12;
         config.fb_count = 1;
         config.fb_location = CAMERA_FB_IN_PSRAM;
