@@ -14,7 +14,12 @@ FogSeekMotorController::FogSeekMotorController() : servo_gpio_(GPIO_NUM_NC),
                                                    motor_gpio_(GPIO_NUM_NC),
                                                    motor_initialized_(false),
                                                    motor_timer_handle_(nullptr),
-                                                   run_time_ms_(0) {}
+                                                   run_time_ms_(0) ,
+                                                   pwm_motor_gpio_(GPIO_NUM_NC),
+                                                   pwm_motor_initialized_(false),
+                                                   pwm_channel_(LEDC_CHANNEL_1),
+                                                   pwm_timer_(LEDC_TIMER_1),
+                                                   current_duty_cycle_(0) {}
 
 FogSeekMotorController::~FogSeekMotorController()
 {
@@ -26,6 +31,9 @@ FogSeekMotorController::~FogSeekMotorController()
     if (motor_timer_handle_ != nullptr)
     {
         esp_timer_delete(motor_timer_handle_);
+    }
+    if (pwm_motor_initialized_) {
+        ledc_stop(LEDC_LOW_SPEED_MODE, pwm_channel_, 0);
     }
 }
 
@@ -173,66 +181,100 @@ void FogSeekMotorController::RunIOMotorTimed(uint32_t run_time_ms)
     }
 }
 
-// 初始化电机 PWM
-void FogSeekMotorController::InitializeMotorPwm(gpio_num_t motor_gpio)
+void FogSeekMotorController::InitializePwmMotor(gpio_num_t motor_gpio, uint32_t freq_hz)
 {
-    // 配置 LEDC 定时器
+    pwm_motor_gpio_ = motor_gpio;
+    
+    gpio_reset_pin(pwm_motor_gpio_);
+    gpio_set_direction(pwm_motor_gpio_, GPIO_MODE_OUTPUT);
+    gpio_set_level(pwm_motor_gpio_, 0);
+    
     ledc_timer_config_t ledc_timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = LEDC_TIMER_12_BIT,
-        .timer_num = LEDC_TIMER_0,
-        .freq_hz = 5000,
+        .timer_num = pwm_timer_,
+        .freq_hz = freq_hz,
         .clk_cfg = LEDC_AUTO_CLK,
-        .deconfigure = false};
-
+    };
+    
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-
-    // 配置 LEDC 通道
+    
     ledc_channel_config_t ledc_channel = {
-        .gpio_num = motor_gpio,
+        .gpio_num = pwm_motor_gpio_,
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = LEDC_CHANNEL_0,
+        .channel = pwm_channel_,
         .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = LEDC_TIMER_0,
+        .timer_sel = pwm_timer_,
         .duty = 0,
         .hpoint = 0,
         .flags = {
             .output_invert = 0,
-        }};
-
+        },
+    };
+    
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
-
-    motor_duty_cycle_ = 0; // 初始占空比为 0
-
-    ESP_LOGI(TAG, "Motor PWM initialized on GPIO %d, initial duty: 0%%", motor_gpio);
+    
+    current_duty_cycle_ = 0;
+    pwm_motor_initialized_ = true;
+    
+    ESP_LOGI(TAG, "PWM motor initialized on GPIO %d, freq: %d Hz", pwm_motor_gpio_, freq_hz);
 }
 
-// 设置电机占空比 (0-100%)
 void FogSeekMotorController::SetMotorDutyCycle(uint8_t percentage)
 {
-    if (percentage > 100)
-    {
+    if (!pwm_motor_initialized_) {
+        ESP_LOGE(TAG, "PWM motor not initialized");
+        return;
+    }
+    
+    if (percentage > 100) {
         percentage = 100;
     }
-
-    // 将百分比转换为 12 位值 (0-4095)
-    motor_duty_cycle_ = (percentage * 4095) / 100;
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, motor_duty_cycle_);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-
-    ESP_LOGI(TAG, "Motor duty cycle set to %d%% (%d)", percentage, motor_duty_cycle_);
+    
+    if (current_duty_cycle_ != percentage) {
+        current_duty_cycle_ = percentage;
+        
+        uint32_t duty_value = (percentage * 4095) / 100;
+        
+        ledc_set_duty(LEDC_LOW_SPEED_MODE, pwm_channel_, duty_value);
+        ledc_update_duty(LEDC_LOW_SPEED_MODE, pwm_channel_);
+        
+        ESP_LOGI(TAG, "PWM motor duty cycle set to %d%% (%d)", percentage, duty_value);
+    }
 }
 
-// 增加电机占空比
 void FogSeekMotorController::IncreaseMotorDutyCycle(uint8_t increment)
 {
-    uint8_t current_percentage = (motor_duty_cycle_ * 100) / 4095;
-    uint8_t new_percentage = current_percentage + increment;
-
-    if (new_percentage > 100)
-    {
+    if (!pwm_motor_initialized_) {
+        ESP_LOGE(TAG, "PWM motor not initialized");
+        return;
+    }
+    
+    uint8_t new_percentage = current_duty_cycle_ + increment;
+    if (new_percentage > 100) {
         new_percentage = 100;
     }
-
+    
     SetMotorDutyCycle(new_percentage);
+}
+
+void FogSeekMotorController::DecreaseMotorDutyCycle(uint8_t decrement)
+{
+    if (!pwm_motor_initialized_) {
+        ESP_LOGE(TAG, "PWM motor not initialized");
+        return;
+    }
+    
+    int new_percentage = (int)current_duty_cycle_ - (int)decrement;
+    if (new_percentage < 0) {
+        new_percentage = 0;
+    }
+    
+    SetMotorDutyCycle((uint8_t)new_percentage);
+}
+
+void FogSeekMotorController::StopMotor()
+{
+    SetMotorDutyCycle(0);
+    ESP_LOGI(TAG, "PWM motor stopped");
 }
