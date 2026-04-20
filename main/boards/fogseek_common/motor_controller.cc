@@ -6,13 +6,13 @@
 
 #define TAG "FogSeekMotorController"
 
-FogSeekMotorController::FogSeekMotorController() : servo_gpio_(GPIO_NUM_NC), 
-                                                   channel_(LEDC_CHANNEL_0), 
-                                                   timer_(LEDC_TIMER_0), 
-                                                   current_angle_(90), 
-                                                   initialized_(false), 
+FogSeekMotorController::FogSeekMotorController() : servo_gpio_(GPIO_NUM_NC),
+                                                   channel_(LEDC_CHANNEL_0),
+                                                   timer_(LEDC_TIMER_0),
+                                                   current_angle_(90),
+                                                   initialized_(false),
                                                    motor_gpio_(GPIO_NUM_NC),
-                                                   motor_initialized_(false), 
+                                                   motor_initialized_(false),
                                                    motor_timer_handle_(nullptr),
                                                    run_time_ms_(0) ,
                                                    pwm_motor_gpio_(GPIO_NUM_NC),
@@ -27,8 +27,9 @@ FogSeekMotorController::~FogSeekMotorController()
     {
         ledc_stop(LEDC_LOW_SPEED_MODE, channel_, 0);
     }
-    
-    if (motor_timer_handle_ != nullptr) {
+
+    if (motor_timer_handle_ != nullptr)
+    {
         esp_timer_delete(motor_timer_handle_);
     }
     if (pwm_motor_initialized_) {
@@ -61,13 +62,13 @@ void FogSeekMotorController::InitializeServo(gpio_num_t servo_gpio)
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 
     // 设置初始角度
-    SetAngle(current_angle_);
+    SetServoAngle(current_angle_);
     initialized_ = true;
 
     ESP_LOGI(TAG, "Servo controller initialized on GPIO %d", servo_gpio_);
 }
 
-void FogSeekMotorController::SetAngle(uint16_t angle)
+void FogSeekMotorController::SetServoAngle(uint16_t angle)
 {
     if (!initialized_)
     {
@@ -92,15 +93,15 @@ void FogSeekMotorController::SetAngle(uint16_t angle)
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, channel_));
 }
 
-uint16_t FogSeekMotorController::GetAngle() const
+uint16_t FogSeekMotorController::GetServoAngle() const
 {
     return current_angle_;
 }
 
-void FogSeekMotorController::InitializeMotor(gpio_num_t motor_gpio)
+void FogSeekMotorController::InitializeIOMotor(gpio_num_t motor_gpio)
 {
     motor_gpio_ = motor_gpio;
-    
+
     // 配置GPIO为输出模式
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
@@ -109,67 +110,73 @@ void FogSeekMotorController::InitializeMotor(gpio_num_t motor_gpio)
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     gpio_config(&io_conf);
-    
+
     // 默认设置为低电平（停止）
     gpio_set_level(motor_gpio_, 0);
-    
+
     motor_initialized_ = true;
-    
+
     ESP_LOGI(TAG, "Motor controller initialized on GPIO %d", motor_gpio_);
 }
 
-void FogSeekMotorController::ControlMotor(bool state)
+void FogSeekMotorController::ControlIOMotor(bool state)
 {
     if (!motor_initialized_)
     {
         ESP_LOGE(TAG, "Motor controller not initialized");
         return;
     }
-    
+
     gpio_set_level(motor_gpio_, state ? 1 : 0);
     ESP_LOGD(TAG, "Motor state set to %s", state ? "ON" : "OFF");
 }
 
-void FogSeekMotorController::RunMotorTimed(uint32_t run_time_ms)
+void FogSeekMotorController::RunIOMotorTimed(uint32_t run_time_ms)
 {
     if (!motor_initialized_)
     {
         ESP_LOGE(TAG, "Motor controller not initialized");
         return;
     }
-    
+
     // 如果已有定时器正在运行，先删除它
-    if (motor_timer_handle_ != nullptr) {
+    if (motor_timer_handle_ != nullptr)
+    {
         esp_timer_stop(motor_timer_handle_);
         esp_timer_delete(motor_timer_handle_);
         motor_timer_handle_ = nullptr;
     }
-    
+
     // 启动电机
-    ControlMotor(true);
-    
+    ControlIOMotor(true);
+
     // 创建一个ESP-IDF定时器来停止电机
     esp_timer_create_args_t timer_args = {};
-    timer_args.callback = [](void* arg) {
-        FogSeekMotorController* motor_ctrl = static_cast<FogSeekMotorController*>(arg);
-        motor_ctrl->ControlMotor(false);  // 停止电机
+    timer_args.callback = [](void *arg)
+    {
+        FogSeekMotorController *motor_ctrl = static_cast<FogSeekMotorController *>(arg);
+        motor_ctrl->ControlIOMotor(false); // 停止电机
         ESP_LOGI(TAG, "Motor stopped after timed run");
     };
     timer_args.arg = this;
     timer_args.name = "motor_timer";
-    
+
     esp_err_t err = esp_timer_create(&timer_args, &motor_timer_handle_);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to create motor timer");
-        ControlMotor(false); // 立即停止电机
+        ControlIOMotor(false); // 立即停止电机
         return;
     }
-    
+
     err = esp_timer_start_once(motor_timer_handle_, run_time_ms * 1000); // 转换为微秒
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to start motor timer");
-        ControlMotor(false); // 立即停止电机
-    } else {
+        ControlIOMotor(false); // 立即停止电机
+    }
+    else
+    {
         ESP_LOGI(TAG, "Motor started for %d ms (single run, no loop)", run_time_ms);
     }
 }

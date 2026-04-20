@@ -17,7 +17,7 @@
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
-#include "uart_transport.h" // 新增：UART串口传输
+#include "uart_transport.h"
 #include "wifi_manager.h"
 
 #define TAG "FogSeekNanoDodopetDodopet"
@@ -50,7 +50,7 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-    UartTransport uart_transport_; // 新增：UART串口传输实例
+    UartTransport uart_transport_;
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
@@ -96,25 +96,6 @@ private:
             .green_gpio = LED_GREEN_GPIO};
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
     }
-
-    // 初始化音频功放引脚并默认关闭功放
-    // void InitializeAudioAmplifier()
-    // {
-    //     gpio_config_t io_conf;
-    //     io_conf.intr_type = GPIO_INTR_DISABLE;
-    //     io_conf.mode = GPIO_MODE_OUTPUT;
-    //     io_conf.pin_bit_mask = (1ULL << AUDIO_CODEC_PA_PIN);
-    //     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    //     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    //     gpio_config(&io_conf);
-    //     SetAudioAmplifierState(false); // 默认关闭功放
-    // }
-
-    // // 设置音频功放状态
-    // void SetAudioAmplifierState(bool enable)
-    // {
-    //     gpio_set_level(AUDIO_CODEC_PA_PIN, enable ? 1 : 0);
-    // }
 
     // 初始化按键回调
     void InitializeButtonCallbacks()
@@ -177,8 +158,7 @@ private:
         }
     }
 
-    // 初始化 UART串口（用于ESP-15F透传模块）
-
+    // 初始化 UART串口
     void InitializeUart()
     {
         ESP_LOGI(TAG, "Starting UART initialization...");
@@ -354,13 +334,7 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
-
-        // auto codec = GetAudioCodec();
-        // codec->SetOutputVolume(70); // 开机后将音量设置为默认值
-        // SetAudioAmplifierState(true);
-
         ESP_LOGI(TAG, "Device powered on.");
-
         HandleAutoWake(); // 开机自动唤醒
     }
 
@@ -369,13 +343,7 @@ private:
     {
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-
-        // auto codec = GetAudioCodec();
-        // codec->SetOutputVolume(0); // 关机后将音量设置为默0
-        // SetAudioAmplifierState(false);
-
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
-
         ESP_LOGI(TAG, "Device powered off.");
     }
 
@@ -385,9 +353,8 @@ public:
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
-        // InitializeAudioAmplifier();
         InitializeButtonCallbacks();
-        InitializeUart(); // 新增：初始化 UART
+        InitializeUart();
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)

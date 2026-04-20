@@ -16,20 +16,20 @@ public:
     void InitializeServo(gpio_num_t servo_gpio);
 
     // 设置舵机角度 (0-180度)
-    void SetAngle(uint16_t angle);
+    void SetServoAngle(uint16_t angle);
 
     // 获取当前角度
-    uint16_t GetAngle() const;
+    uint16_t GetServoAngle() const;
 
     // 电机控制相关方法
     // 初始化电机控制器
-    void InitializeMotor(gpio_num_t motor_gpio);
+    void InitializeIOMotor(gpio_num_t motor_gpio);
 
     // 直接控制电机状态
-    void ControlMotor(bool state);
+    void ControlIOMotor(bool state);
 
     // 定时运行电机，运行指定时间后停止
-    void RunMotorTimed(uint32_t run_time_ms);
+    void RunIOMotorTimed(uint32_t run_time_ms);
 
     // PWM电机控制相关方法（占空比控制）
     void InitializePwmMotor(gpio_num_t motor_gpio, uint32_t freq_hz = 5000);
@@ -43,6 +43,7 @@ public:
 
 private:
 
+private:
     // 舵机相关属性
     gpio_num_t servo_gpio_;
     ledc_channel_t channel_;
