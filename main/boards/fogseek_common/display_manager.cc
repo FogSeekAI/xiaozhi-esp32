@@ -6,6 +6,7 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_interface.h>
 #include <esp_lcd_st77916.h>
+#include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
 #include <esp_err.h>
 #include <freertos/task.h>
 #include <cstring>
@@ -542,57 +543,43 @@ static const lcd_config_item_t hxc_1_15_config = {
     .init_cmds = NULL, // 使用标准库默认初始化
     .init_cmds_size = 0};
 
+static const lcd_config_item_t jyc_0_71_config = {
+    .comm_type = COMM_SPI,
+    .driver_type = DRIVER_GC9D01,
+    .init_cmds = NULL, // 使用标准库默认初始化
+    .init_cmds_size = 0};
 // 通信接口和驱动接口的实现类定义
-class SpiCommunicationInterface : public ICommunicationInterface
+class SpiCommInterface : public ICommInterface
 {
 public:
     bool Initialize(esp_lcd_panel_io_handle_t *panel_io, const lcd_pin_config_t *pin_config) override
     {
         // 配置SPI接口
         spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = (gpio_num_t)pin_config->spi_mosi_gpio;
-        buscfg.miso_io_num = (gpio_num_t)(-1); // ST7789不需要MISO
-        buscfg.sclk_io_num = (gpio_num_t)pin_config->spi_sclk_gpio;
-        buscfg.data0_io_num = (gpio_num_t)(-1);
-        buscfg.data1_io_num = (gpio_num_t)(-1);
-        buscfg.data2_io_num = (gpio_num_t)(-1);
-        buscfg.data3_io_num = (gpio_num_t)(-1);
-        buscfg.data4_io_num = (gpio_num_t)(-1);
-        buscfg.data5_io_num = (gpio_num_t)(-1);
-        buscfg.data6_io_num = (gpio_num_t)(-1);
-        buscfg.data7_io_num = (gpio_num_t)(-1);
-        buscfg.max_transfer_sz = 0;
-        buscfg.flags = 0; // 设置为0，不再使用结构体形式访问
-        buscfg.intr_flags = 0;
+            buscfg.mosi_io_num = (gpio_num_t)(pin_config->spi_mosi_gpio);
+            buscfg.miso_io_num = GPIO_NUM_NC; // ST7789不需要MISO
+            buscfg.sclk_io_num = (gpio_num_t)(pin_config->spi_sclk_gpio);
+            buscfg.data0_io_num = (gpio_num_t)(-1);
+            buscfg.data1_io_num = (gpio_num_t)(-1);
+            buscfg.data2_io_num = (gpio_num_t)(-1);
+            buscfg.data3_io_num = (gpio_num_t)(-1);
+            buscfg.data4_io_num = (gpio_num_t)(-1);
+            buscfg.data5_io_num = (gpio_num_t)(-1);
+            buscfg.data6_io_num = (gpio_num_t)(-1);
+            buscfg.data7_io_num = (gpio_num_t)(-1);
+            buscfg.max_transfer_sz = (pin_config->width) * (pin_config->height)* sizeof(uint16_t);
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-        esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "SPI init failed");
-            return false;
-        }
 
         esp_lcd_panel_io_spi_config_t io_config = {};
-        io_config.cs_gpio_num = (gpio_num_t)pin_config->spi_cs_gpio;
-        io_config.dc_gpio_num = (gpio_num_t)pin_config->st7789_dc_gpio;
-        io_config.spi_mode = 0;
-        io_config.pclk_hz = 40 * 1000 * 1000; // 40MHz
-        io_config.trans_queue_depth = 10;
-        io_config.on_color_trans_done = nullptr;
-        io_config.user_ctx = nullptr;
-        io_config.lcd_cmd_bits = 8;
-        io_config.lcd_param_bits = 8;
-        io_config.flags.dc_low_on_data = 0;
-        io_config.flags.octal_mode = 0;
-        io_config.flags.lsb_first = 0;
-        io_config.flags.cs_high_active = 0;
-
-        ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, panel_io);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Panel IO init failed");
-            return false;
-        }
+            io_config.cs_gpio_num = (gpio_num_t)(pin_config->spi_cs_gpio);
+            io_config.dc_gpio_num = (gpio_num_t)(pin_config->spi_dc_gpio);
+            io_config.spi_mode = 0;
+            io_config.pclk_hz = 40* 1000 * 1000;
+            io_config.trans_queue_depth = 10;
+            io_config.lcd_cmd_bits = 8;
+            io_config.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, panel_io));
 
         ESP_LOGI(TAG, "SPI communication interface initialized successfully");
         return true;
@@ -600,40 +587,18 @@ public:
 };
 
 // QSPI通信接口实现
-class QspiCommunicationInterface : public ICommunicationInterface
+class QspiCommInterface : public ICommInterface
 {
 public:
     bool Initialize(esp_lcd_panel_io_handle_t *panel_io, const lcd_pin_config_t *pin_config) override
     {
-        // 配置IM0和IM2引脚用于QSPI模式选择（仅沃乐康屏幕需要）
-        if (pin_config->qspi_d0_gpio >= 0 && pin_config->qspi_d1_gpio >= 0)
-        {
-            gpio_config_t io_conf = {};
-            io_conf.pin_bit_mask = (1ULL << pin_config->qspi_d0_gpio) | (1ULL << pin_config->qspi_d1_gpio);
-            io_conf.mode = GPIO_MODE_OUTPUT;
-            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
-            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-            io_conf.intr_type = GPIO_INTR_DISABLE;
-
-            esp_err_t ret = gpio_config(&io_conf);
-            if (ret != ESP_OK)
-            {
-                ESP_LOGE(TAG, "GPIO config failed");
-                return false;
-            }
-
-            // 设置IM0=1, IM2=0选择QSPI模式
-            gpio_set_level((gpio_num_t)pin_config->qspi_d0_gpio, 1);
-            gpio_set_level((gpio_num_t)pin_config->qspi_d1_gpio, 0);
-        }
-
         // 使用标准ESP-IDF配置初始化SPI总线
         spi_bus_config_t bus_config = {};
         bus_config.data0_io_num = (gpio_num_t)pin_config->qspi_d0_gpio;
         bus_config.data1_io_num = (gpio_num_t)pin_config->qspi_d1_gpio;
-        bus_config.sclk_io_num = (gpio_num_t)pin_config->qspi_sclk_gpio;
         bus_config.data2_io_num = (gpio_num_t)pin_config->qspi_d2_gpio;
         bus_config.data3_io_num = (gpio_num_t)pin_config->qspi_d3_gpio;
+        bus_config.sclk_io_num = (gpio_num_t)pin_config->qspi_sclk_gpio;
         bus_config.data4_io_num = (gpio_num_t)(-1);
         bus_config.data5_io_num = (gpio_num_t)(-1);
         bus_config.data6_io_num = (gpio_num_t)(-1);
@@ -649,18 +614,21 @@ public:
             return false;
         }
 
-        // 使用ESP-IDF标准宏配置QSPI接口IO
-        esp_lcd_panel_io_spi_config_t io_config = ST77916_PANEL_IO_QSPI_CONFIG(
-            (gpio_num_t)pin_config->qspi_cs_gpio,
-            NULL,
-            NULL);
-
-        ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, panel_io);
-        if (ret != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Panel IO init failed");
-            return false;
-        }
+        esp_lcd_panel_io_spi_config_t io_config = {
+            .cs_gpio_num = (gpio_num_t)pin_config->qspi_cs_gpio,  // CS引脚
+            .dc_gpio_num = GPIO_NUM_NC,  // QSPI模式下通常不需要DC引脚
+            .spi_mode = 0, 
+            .pclk_hz = 40 * 1000 * 1000,  
+            .trans_queue_depth = 10,  
+            .on_color_trans_done = NULL,
+            .user_ctx = NULL,  
+            .lcd_cmd_bits = 32,  
+            .lcd_param_bits = 8,  
+            .flags = {
+                .quad_mode = true,  
+            },
+        };
+        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, panel_io);
 
         ESP_LOGI(TAG, "QSPI communication interface initialized successfully");
         return true;
@@ -675,7 +643,7 @@ public:
     {
         // 创建ST7789面板
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = (gpio_num_t)pin_config->st7789_reset_gpio;
+        panel_config.reset_gpio_num = (gpio_num_t)(pin_config->spi_reset_gpio);
         panel_config.color_space = ESP_LCD_COLOR_SPACE_BGR;
         panel_config.bits_per_pixel = 16;
         panel_config.flags.reset_active_high = 0;
@@ -738,7 +706,7 @@ public:
         vendor_config.flags.use_qspi_interface = 1;
 
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = (gpio_num_t)pin_config->st77916_reset_gpio;
+        panel_config.reset_gpio_num = (gpio_num_t)pin_config->spi_reset_gpio;
         panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
         panel_config.bits_per_pixel = 16;
         panel_config.vendor_config = &vendor_config;
@@ -779,11 +747,47 @@ public:
     }
 };
 
+// GC9D01驱动实现
+class Gc9d01DisplayDriver : public IDisplayDriver
+{
+private:
+    lcd_type_t lcd_type_;
+public:
+    Gc9d01DisplayDriver(lcd_type_t lcd_type) : lcd_type_(lcd_type) {}
+
+    bool Initialize(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t *panel, const lcd_pin_config_t *pin_config, const lcd_config_item_t &config) override
+    {
+        // 创建GC9D01面板
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = (gpio_num_t)(pin_config->spi_reset_gpio);
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+        panel_config.bits_per_pixel = 16;
+
+        esp_err_t ret = esp_lcd_new_panel_gc9d01n(panel_io, &panel_config, panel);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Panel creation failed");
+            return false;
+        }
+
+        // 如果提供了自定义初始化命令，则发送它们
+        if (config.init_cmds != NULL && config.init_cmds_size > 0)
+        {
+            // GC9D01使用标准初始化，这里跳过自定义命令
+        }
+        esp_lcd_panel_reset(*panel);
+        esp_lcd_panel_init(*panel);
+        esp_lcd_panel_disp_on_off(*panel, true);     // 打开显示
+
+        ESP_LOGI(TAG, "GC9D01 driver initialized successfully");
+        return true;
+    }
+};
 // 构造函数
 FogSeekDisplayManager::FogSeekDisplayManager() : panel_io_(nullptr),
-                                                 panel_(nullptr),
-                                                 backlight_(nullptr),
-                                                 display_(nullptr)
+                                                panel_(nullptr),
+                                                backlight_(nullptr),
+                                                display_(nullptr)
 {
 }
 
@@ -825,20 +829,22 @@ const lcd_config_item_t *FogSeekDisplayManager::GetLcdConfig(lcd_type_t lcd_type
         return &hxc_1_8_config;
     case DISPLAY_TYPE_HXC_1_15_INCH:
         return &hxc_1_15_config;
+    case DISPLAY_TYPE_JYC_0_71_INCH:
+        return &jyc_0_71_config;    
     default:
         ESP_LOGE(TAG, "Unsupported LCD type: %d", lcd_type);
         return nullptr;
     }
 }
 
-std::unique_ptr<ICommunicationInterface> FogSeekDisplayManager::CreateCommunicationInterface(comm_type_t comm_type)
+std::unique_ptr<ICommInterface> FogSeekDisplayManager::CreateCommInterface(comm_type_t comm_type)
 {
     switch (comm_type)
     {
     case COMM_SPI:
-        return std::make_unique<SpiCommunicationInterface>();
+        return std::make_unique<SpiCommInterface>();
     case COMM_QSPI:
-        return std::make_unique<QspiCommunicationInterface>();
+        return std::make_unique<QspiCommInterface>();
     default:
         return nullptr;
     }
@@ -852,6 +858,8 @@ std::unique_ptr<IDisplayDriver> FogSeekDisplayManager::CreateDisplayDriver(drive
         return std::make_unique<St7789DisplayDriver>();
     case DRIVER_ST77916:
         return std::make_unique<St77916DisplayDriver>(lcd_type);
+    case DRIVER_GC9D01:
+        return std::make_unique<Gc9d01DisplayDriver>(lcd_type);    
     default:
         return nullptr;
     }
@@ -866,9 +874,26 @@ void FogSeekDisplayManager::Initialize(lcd_type_t lcd_type, const lcd_pin_config
         ESP_LOGE(TAG, "Invalid LCD type: %d", lcd_type);
         return;
     }
+    // 配置IM0和IM2引脚用于QSPI模式选择（仅沃乐康屏幕需要）
+    if(lcd_type==DISPLAY_TYPE_WLK_1_8_INCH)
+    {
+        if (pin_config->qspi_im0_gpio >= 0 && pin_config->qspi_im2_gpio >= 0)
+        {
+            gpio_config_t io_conf = {};
+            io_conf.pin_bit_mask = (1ULL << pin_config->qspi_im0_gpio) | (1ULL << pin_config->qspi_im2_gpio);
+            io_conf.mode = GPIO_MODE_OUTPUT;
+            io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+            io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+            io_conf.intr_type = GPIO_INTR_DISABLE;
 
+            esp_err_t ret = gpio_config(&io_conf);
+            // 设置IM0=1, IM2=0选择QSPI模式
+            gpio_set_level((gpio_num_t)pin_config->qspi_im0_gpio, 1);
+            gpio_set_level((gpio_num_t)pin_config->qspi_im2_gpio, 0);
+        }
+    }
     // 创建通信接口
-    auto comm_interface = CreateCommunicationInterface(config->comm_type);
+    auto comm_interface = CreateCommInterface(config->comm_type);
     if (!comm_interface)
     {
         ESP_LOGE(TAG, "Failed to create communication interface for LCD type: %d", lcd_type);
@@ -898,22 +923,22 @@ void FogSeekDisplayManager::Initialize(lcd_type_t lcd_type, const lcd_pin_config
     }
 
     // 通用初始化流程
-    if (!InitializeCommonComponents(pin_config))
+    if (!InitializeComponents(pin_config))
     {
         ESP_LOGE(TAG, "Failed to initialize common components");
         return;
     }
 }
 
-bool FogSeekDisplayManager::InitializeCommonComponents(const lcd_pin_config_t *pin_config)
+bool FogSeekDisplayManager::InitializeComponents(const lcd_pin_config_t *pin_config)
 {
     // 9. 初始化背光
-    backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->st7789_bl_gpio, true);
+    backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->spi_bl_gpio, true);
     if (backlight_)
     {
         backlight_->SetBrightness(0);
     }
-
+    SetBrightness(100);
     // 10. 创建SPI LCD显示对象
     display_ = new (std::nothrow) SpiLcdDisplay(
         panel_io_,
