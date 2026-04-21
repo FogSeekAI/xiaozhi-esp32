@@ -25,22 +25,22 @@
 #define AUDIO_CODEC_I2C_SCL_PIN GPIO_NUM_11 // I2C时钟线
 #define AUDIO_CODEC_I2C_SDA_PIN GPIO_NUM_12 // I2C数据线
 
-#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_38 // 主时钟
+#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_9 // 主时钟
 #define AUDIO_I2S_GPIO_BCLK GPIO_NUM_14 // 位时钟
 #define AUDIO_I2S_GPIO_WS GPIO_NUM_16   // 帧时钟
 #define AUDIO_I2S_GPIO_DOUT GPIO_NUM_13 // 数据输出（扬声器）
 #define AUDIO_I2S_GPIO_DIN GPIO_NUM_17  // 数据输入（麦克风）
 
-#define AUDIO_CODEC_PA_PIN GPIO_NUM_41                    // NS4150B功放使能引脚
+#define AUDIO_CODEC_PA_PIN GPIO_NUM_38                    // NS4150B功放使能引脚
 #define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR // ES8389默认I2C地址
 
 // 定义 GPIO 引脚
-#define RADAR_GPIO GPIO_NUM_40    // 雷达传感器 IO40
-#define MOTOR_GPIO  GPIO_NUM_43    // 电机控制 IO43
+#define RADAR_GPIO GPIO_NUM_7    // 雷达传感器 IO40
+#define MOTOR_GPIO  GPIO_NUM_8  // 电机控制 IO43
 
 // 触摸传感器配置
-#define TOUCH_SENSOR_1_GPIO GPIO_NUM_44    // 普通触摸传感器 GPIO44
-#define TOUCH_SENSOR_2_CHANNEL TOUCH_PAD_NUM9  // 电容触摸传感器 GPIO9 (TOUCH_PAD_NUM9)
+#define TOUCH_SENSOR_1_GPIO GPIO_NUM_4    // 普通触摸传感器 GPIO44
+#define TOUCH_SENSOR_2_CHANNEL TOUCH_PAD_NUM5  // 电容触摸传感器 GPIO9 (TOUCH_PAD_NUM9)
 #define TOUCH_SENSOR_2_THRESHOLD_PERCENT 0.05f  // 电容触摸阈值百分比 (5%)
 
 

@@ -371,6 +371,23 @@ public:
         return led_controller_.GetGreenLed();
     }
 
+    virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging) override
+    {
+        auto power_state = power_manager_.GetPowerState();
+        
+        level = power_manager_.ReadBatteryLevel();
+        
+        charging = (power_state == FogSeekPowerManager::PowerState::USB_POWER_CHARGING);
+        
+        discharging = (power_state == FogSeekPowerManager::PowerState::BATTERY_POWER || 
+                      power_state == FogSeekPowerManager::PowerState::LOW_BATTERY);
+        
+            ESP_LOGD(TAG, "Battery: level=%d%%, charging=%d, discharging=%d, state=%d", 
+                 level, charging, discharging, static_cast<int>(power_state));
+        
+        return true;
+    }
+
     ~FogSeekNanoToy()
     {
         if (check_idle_timer_) {
