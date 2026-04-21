@@ -76,24 +76,26 @@ private:
     void InitializeDisplayManager()
     {
         lcd_pin_config_t lcd_pin_config = {
-            .io0_gpio = LCD_IO0_GPIO,
-            .io1_gpio = LCD_IO1_GPIO,
-            .scl_gpio = LCD_SCL_GPIO,
-            .io2_gpio = LCD_IO2_GPIO,
-            .io3_gpio = LCD_IO3_GPIO,
-            .cs_gpio = LCD_CS_GPIO,
-            .dc_gpio = LCD_DC_GPIO,
-            .reset_gpio = LCD_RESET_GPIO,
-            .im0_gpio = LCD_IM0_GPIO,
-            .im2_gpio = LCD_IM2_GPIO,
-            .bl_gpio = LCD_BL_GPIO,
+            .qspi_d0_gpio = LCD_IO0_GPIO,
+            .qspi_d1_gpio = LCD_IO1_GPIO,
+            .qspi_d2_gpio = LCD_IO2_GPIO,
+            .qspi_d3_gpio = LCD_IO3_GPIO,
+            .qspi_cs_gpio = LCD_CS_GPIO,
+            .qspi_sclk_gpio = LCD_SCL_GPIO,
+            .qspi_im0_gpio = LCD_IM0_GPIO,
+            .qspi_im2_gpio = LCD_IM2_GPIO,
+            .spi_dc_gpio = LCD_DC_GPIO,
+            .spi_reset_gpio = LCD_RESET_GPIO,
+            .spi_bl_gpio = LCD_BL_GPIO,
             .width = LCD_H_RES,
             .height = LCD_V_RES,
             .offset_x = DISPLAY_OFFSET_X,
             .offset_y = DISPLAY_OFFSET_Y,
             .mirror_x = DISPLAY_MIRROR_X,
             .mirror_y = DISPLAY_MIRROR_Y,
-            .swap_xy = DISPLAY_SWAP_XY};
+            .swap_xy = DISPLAY_SWAP_XY,
+            .rotation=DISPLAY_ROTATION,
+        };
         display_manager_.Initialize(BOARD_LCD_TYPE, &lcd_pin_config);
     }
 
