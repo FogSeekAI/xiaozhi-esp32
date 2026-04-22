@@ -213,7 +213,16 @@ private:
             },
         };
         esp_lcd_panel_io_handle_t tp_io_handle = NULL;
-        esp_lcd_panel_io_i2c_config_t tp_io_config = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
+        esp_lcd_panel_io_i2c_config_t tp_io_config = {
+            .dev_addr = ESP_LCD_TOUCH_IO_I2C_FT5x06_ADDRESS,
+            .control_phase_bytes = 1,
+            .dc_bit_offset = 0,
+            .lcd_cmd_bits = 8,
+            .flags =
+            {
+                .disable_control_phase = 1,
+            }
+        };
         tp_io_config.scl_speed_hz = 400000;
 
         esp_lcd_new_panel_io_i2c(i2c_bus_, &tp_io_config, &tp_io_handle);
@@ -237,9 +246,9 @@ private:
         // 打开摄像头电源 (PCA9557 bit 2)
         pca9557_->SetOutputState(2, 0);
 
-        camera_config_t config;
-        config.ledc_channel = LEDC_CHANNEL_0;
-        config.ledc_timer = LEDC_TIMER_0;
+        camera_config_t config = {};
+        config.ledc_channel = LEDC_CHANNEL_2;
+        config.ledc_timer = LEDC_TIMER_2;
         config.pin_d0 = CAMERA_PIN_D0;
         config.pin_d1 = CAMERA_PIN_D1;
         config.pin_d2 = CAMERA_PIN_D2;
@@ -252,191 +261,20 @@ private:
         config.pin_pclk = CAMERA_PIN_PCLK;
         config.pin_vsync = CAMERA_PIN_VSYNC;
         config.pin_href = CAMERA_PIN_HREF;
-        config.pin_sccb_sda = -1;  // 使用已初始化的 I2C 接口
+        config.pin_sccb_sda = -1;
         config.pin_sccb_scl = CAMERA_PIN_SIOC;
-        config.sccb_i2c_port = 1;  // 使用 I2C port 1 (与音频编解码器共用)
+        config.sccb_i2c_port = 1;
         config.pin_pwdn = CAMERA_PIN_PWDN;
         config.pin_reset = CAMERA_PIN_RESET;
         config.xclk_freq_hz = XCLK_FREQ_HZ;
-        config.pixel_format = PIXFORMAT_RGB565;  // GC0308 不支持 JPEG，使用 RGB565
-        config.frame_size = FRAMESIZE_QVGA;  // 320x240，与 LCD 尺寸匹配
-        config.jpeg_quality = 15;
+        config.pixel_format = PIXFORMAT_RGB565;
+        config.frame_size = FRAMESIZE_QVGA;
+        config.jpeg_quality = 12;
         config.fb_count = 1;
         config.fb_location = CAMERA_FB_IN_PSRAM;
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
-        esp_err_t err = esp_camera_init(&config);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Camera init failed with error 0x%x", err);
-            return;
-        }
-
-        sensor_t* s = esp_camera_sensor_get();
-        if (s) {
-            s->set_hmirror(s, 0);
-            s->set_vflip(s, 0);
-        }
-
-        camera_initialized_ = true;
-        ESP_LOGI(TAG, "Camera initialized successfully (RGB565 format)");
-    }
-
-    
-
-    bool CaptureAndDisplayPhoto(int display_duration_ms = 3000) {
-        if (!camera_initialized_) {
-            ESP_LOGE(TAG, "Camera not initialized");
-            return false;
-        }
-
-        if (!lcd_panel_) {
-            ESP_LOGE(TAG, "LCD panel not initialized");
-            return false;
-        }
-
-        ESP_LOGI(TAG, "Capturing photo...");
-        
-        camera_fb_t* old_fb = esp_camera_fb_get();
-        if (old_fb) {
-            esp_camera_fb_return(old_fb);
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
-        
-        camera_fb_t* fb = esp_camera_fb_get();
-        if (!fb) {
-            ESP_LOGE(TAG, "Camera capture failed");
-            return false;
-        }
-
-        ESP_LOGI(TAG, "Photo captured: %lux%lu, format: %d, size: %lu bytes",
-            fb->width, fb->height, fb->format, fb->len);
-
-        lvgl_port_lock(0);
-        lv_timer_enable(false);
-        lvgl_port_unlock();
-        
-        vTaskDelay(pdMS_TO_TICKS(50));
-
-        const int lines_per_chunk = 40;
-        
-        if (fb->format == PIXFORMAT_RGB565) {
-            uint16_t* line_buffer = (uint16_t*)fb->buf;
-            
-            for (int y = 0; y < fb->height; y += lines_per_chunk) {
-                int chunk_height = (y + lines_per_chunk > fb->height) ? 
-                                  (fb->height - y) : lines_per_chunk;
-                
-                uint16_t* chunk_start = line_buffer + (y * fb->width);
-                
-                esp_lcd_panel_draw_bitmap(lcd_panel_, 
-                    0, y, 
-                    fb->width, y + chunk_height, 
-                    chunk_start);
-                
-                vTaskDelay(pdMS_TO_TICKS(2));
-            }
-        }
-
-        ESP_LOGI(TAG, "Photo displayed on LCD for %d ms", display_duration_ms);
-        
-        esp_camera_fb_return(fb);
-        
-        vTaskDelay(pdMS_TO_TICKS(display_duration_ms));
-        
-        lvgl_port_lock(0);
-        lv_timer_enable(true);
-        lv_obj_invalidate(lv_scr_act());
-        lvgl_port_unlock();
-
-        return true;
-    }
-
-    
-
-    void ClearCapturedPhoto() {
-        if (captured_image_) {
-            heap_caps_free(captured_image_);
-            captured_image_ = nullptr;
-            captured_image_size_ = 0;
-            ESP_LOGI(TAG, "Photo cleared from memory");
-        }
-    }
-
-
-    std::string ConvertRGB565ToJpeg(camera_fb_t* fb) {
-        if (fb->format != PIXFORMAT_RGB565) {
-            throw std::runtime_error("Unsupported pixel format");
-        }
-
-        ESP_LOGI(TAG, "Converting RGB565 to JPEG...");
-        
-        size_t rgb888_size = fb->width * fb->height * 3;
-        uint8_t* rgb888_buf = (uint8_t*)heap_caps_malloc(rgb888_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        
-        if (!rgb888_buf) {
-            throw std::runtime_error("Failed to allocate RGB888 buffer");
-        }
-
-        uint16_t* src = (uint16_t*)fb->buf;
-        uint8_t* dst = rgb888_buf;
-        
-        for (size_t i = 0; i < fb->width * fb->height; i++) {
-            uint16_t pixel = __builtin_bswap16(src[i]);
-            
-            uint8_t r = (pixel >> 11) & 0x1F;
-            uint8_t g = (pixel >> 5) & 0x3F;
-            uint8_t b = pixel & 0x1F;
-            
-            r = (r << 3) | (r >> 2);
-            g = (g << 2) | (g >> 4);
-            b = (b << 3) | (b >> 2);
-            
-            *dst++ = r;
-            *dst++ = g;
-            *dst++ = b;
-        }
-
-        jpeg_enc_config_t config = DEFAULT_JPEG_ENC_CONFIG();
-        config.width = fb->width;
-        config.height = fb->height;
-        config.src_type = JPEG_PIXEL_FORMAT_RGB888;
-        config.quality = 20;
-        config.task_enable = false;
-
-        jpeg_enc_handle_t jpeg_enc = NULL;
-        jpeg_error_t err = jpeg_enc_open(&config, &jpeg_enc);
-        
-        if (err != JPEG_ERR_OK || !jpeg_enc) {
-            heap_caps_free(rgb888_buf);
-            throw std::runtime_error("Failed to open JPEG encoder");
-        }
-
-        size_t jpeg_out_size = rgb888_size / 4;
-        uint8_t* jpeg_buf = (uint8_t*)heap_caps_malloc(jpeg_out_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        
-        if (!jpeg_buf) {
-            jpeg_enc_close(jpeg_enc);
-            heap_caps_free(rgb888_buf);
-            throw std::runtime_error("Failed to allocate JPEG output buffer");
-        }
-
-        int out_size = 0;
-        err = jpeg_enc_process(jpeg_enc, rgb888_buf, rgb888_size, jpeg_buf, jpeg_out_size, &out_size);
-        
-        jpeg_enc_close(jpeg_enc);
-        heap_caps_free(rgb888_buf);
-
-        if (err != JPEG_ERR_OK || out_size == 0) {
-            heap_caps_free(jpeg_buf);
-            throw std::runtime_error("JPEG encoding failed");
-        }
-        
-        ESP_LOGI(TAG, "JPEG encoded: %d bytes", out_size);
-        
-        std::string jpeg_data((char*)jpeg_buf, out_size);
-        heap_caps_free(jpeg_buf);
-        
-        return jpeg_data;
+        camera_ = new Esp32Camera(config);
     }
 
     void InitializeTools() {
