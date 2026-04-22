@@ -1,0 +1,260 @@
+#include "wifi_board.h"
+#include "config.h"
+#include "tca6408a_io_expander.h"
+#include "tca6408a_interrupt_manager.h"
+#include "tca6408a_button.h"
+#include "tca6408a_power_manager.h"
+#include "tca6408a_led_controller.h"
+#include "tca6408a_led.h"
+#include "codecs/box_audio_codec.h"
+#include "system_reset.h"
+#include "application.h"
+#include "button.h"
+#include "assets/lang_config.h"
+#include "adc_battery_monitor.h"
+#include "device_state_machine.h"
+#include <esp_log.h>
+#include <driver/rtc_io.h>
+#include <driver/i2c_master.h>
+#include <driver/gpio.h>
+
+#define TAG "FogSeekEdge"
+
+class FogSeekEdge : public WifiBoard
+{
+private:
+    Button boot_button_;
+    tca6408a_handle_t tca6408a_handle_;
+
+    Tca6408aInterruptManager interrupt_manager_;
+    Tca6408aButton ctrl_button_;
+    Tca6408aPowerManager power_manager_;
+    Tca6408aLedController led_controller_;
+    Tca6408aLed *test_led_ = nullptr;
+    i2c_master_bus_handle_t i2c_bus_ = nullptr;
+    AudioCodec *audio_codec_ = nullptr;
+    esp_timer_handle_t button_monitor_timer_ = nullptr;
+
+    void InitializeI2c()
+    {
+        i2c_master_bus_config_t i2c_bus_cfg = {
+            .i2c_port = (i2c_port_t)0,
+            .sda_io_num = I2C_SDA_GPIO,
+            .scl_io_num = I2C_SCL_GPIO,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .intr_priority = 0,
+            .trans_queue_depth = 0,
+            .flags = {
+                .enable_internal_pullup = 1,
+            },
+        };
+        ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
+    }
+
+    void InitializeTca6408a()
+    {
+        tca6408a_config_t tca6408a_config = {
+            .i2c_bus = i2c_bus_,
+            .i2c_address = 0x20,
+            .int_gpio = I2C_INT_GPIO,
+            .reset_gpio = GPIO_NUM_NC};
+
+        esp_err_t ret = tca6408a_init(&tca6408a_handle_, &tca6408a_config);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to initialize Tca6408a");
+            return;
+        }
+
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_QSPI_PIN_NUM_LCD_BL, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_CTRL_BUTTON_GPIO, TCA6408A_DIR_INPUT);
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGE_DONE_GPIO, TCA6408A_DIR_INPUT);
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGING_GPIO, TCA6408A_DIR_INPUT);
+        ESP_LOGI(TAG, "Tca6408a initialized successfully");
+    }
+
+    void InitializeInterruptManager()
+    {
+        interrupt_manager_.Initialize(&tca6408a_handle_, I2C_INT_GPIO);
+        ESP_LOGI(TAG, "Interrupt manager initialized on GPIO%d", I2C_INT_GPIO);
+    }
+
+    void InitializePowerManager()
+    {
+        Tca6408aPowerManager::power_pin_config_t power_config = {
+            .hold_gpio = TCA6408A_PWR_HOLD_GPIO,
+            .charging_gpio = TCA6408A_PWR_CHARGING_GPIO,
+            .charge_done_gpio = TCA6408A_PWR_CHARGE_DONE_GPIO,
+            .adc_gpio = BATTERY_ADC_GPIO};
+
+        power_manager_.Initialize(&tca6408a_handle_, &power_config);
+        ESP_LOGI(TAG, "Tca6408a Power Manager initialized");
+    }
+
+    void InitializeLedController()
+    {
+        tca6408a_led_pin_config_t led_config = {
+            .red_gpio = TCA6408A_LED_RED_GPIO,
+            .green_gpio = TCA6408A_LED_GREEN_GPIO};
+
+        led_controller_.InitializeLeds(&tca6408a_handle_, &led_config, power_manager_);
+        ESP_LOGI(TAG, "TCA6408A LED controller initialized");
+    }
+
+    void InitializeCtrlButton()
+    {
+        ctrl_button_.Initialize(&tca6408a_handle_, TCA6408A_CTRL_BUTTON_GPIO, true);
+        ctrl_button_.Initialize(&interrupt_manager_);
+
+        ctrl_button_.OnClick([this]()
+                             {
+
+                                 auto &app = Application::GetInstance();
+                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                                 ESP_LOGI(TAG, "Clicked"); });
+
+        ctrl_button_.OnDoubleClick([this]()
+                                   {
+                                       
+                                       auto &app = Application::GetInstance();
+                                       if (app.GetDeviceState() == kDeviceStateStarting)
+                                       {
+                                           EnterWifiConfigMode();
+                                           return;
+                                       }
+                                       ESP_LOGI(TAG, "Double clicked"); });
+        ctrl_button_.OnLongPress([this]()
+                                 {
+                                      ESP_LOGI(TAG, "On Long Press");
+                                      static bool state = false;
+                                      state = !state;
+                                      // 切换电源状态
+                                      if (state)
+                                      {
+                                          PowerOn();
+                                      }
+                                      else
+                                      {
+                                          PowerOff();
+                                      } });
+        ESP_LOGI(TAG, "Control button initialized on P%d", TCA6408A_CTRL_BUTTON_GPIO);
+    }
+
+    // 处理自动唤醒逻辑
+    void HandleAutoWake()
+    {
+        auto &app = Application::GetInstance();
+        if (app.GetDeviceState() == DeviceState::kDeviceStateIdle)
+        {
+            auto &app = Application::GetInstance();
+            // USB充电状态下开机需要播放音效
+            if (power_manager_.IsUsbPowered())
+            {
+                app.PlaySound(Lang::Sounds::OGG_SUCCESS);
+                vTaskDelay(pdMS_TO_TICKS(500)); // 延时500ms播放音效
+            }
+            app.Schedule([]()
+                         {
+                            auto &app = Application::GetInstance();
+                            app.ToggleChatState(); });
+        }
+        else
+        {
+            // 设备尚未进入空闲状态，500ms后再次检查，使用定时器异步检查，不阻塞当前任务
+            esp_timer_handle_t check_timer;
+            esp_timer_create_args_t timer_args = {};
+            timer_args.callback = [](void *arg)
+            {
+                auto instance = static_cast<FogSeekEdge *>(arg);
+                instance->HandleAutoWake();
+            };
+            timer_args.arg = this;
+            timer_args.name = "check_idle_timer";
+            esp_timer_create(&timer_args, &check_timer);
+            esp_timer_start_once(check_timer, 500000); // 500ms = 500000微秒
+        }
+        ESP_LOGI(TAG, "Handle Auto Wake.");
+    }
+
+    // 开机流程
+    void PowerOn()
+    {
+        power_manager_.PowerOn();
+        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
+
+        // 更新 LED 状态（由 LED 控制器管理）
+        led_controller_.UpdateLedStatus(power_manager_);
+
+        ESP_LOGI(TAG, "Device powered on.");
+
+        HandleAutoWake();
+    }
+
+    void PowerOff()
+    {
+        power_manager_.PowerOff();
+        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 0);
+
+        // 更新 LED 状态（由 LED 控制器管理，会自动熄灭）
+        led_controller_.UpdateLedStatus(power_manager_);
+
+        Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
+        ESP_LOGI(TAG, "Device powered off.");
+    }
+
+public:
+    FogSeekEdge() : boot_button_(BOOT_BUTTON_GPIO)
+    {
+        InitializeI2c();
+        InitializeTca6408a();
+        InitializeInterruptManager();
+        InitializePowerManager();
+        InitializeLedController();
+        InitializeCtrlButton();
+    }
+
+    virtual AudioCodec *GetAudioCodec() override
+    {
+        static BoxAudioCodec audio_codec(
+            i2c_bus_,
+            AUDIO_INPUT_SAMPLE_RATE,
+            AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_MCLK,
+            AUDIO_I2S_GPIO_BCLK,
+            AUDIO_I2S_GPIO_WS,
+            AUDIO_I2S_GPIO_DOUT,
+            AUDIO_I2S_GPIO_DIN,
+            AUDIO_CODEC_PA_PIN,
+            AUDIO_CODEC_ES8311_ADDR,
+            AUDIO_CODEC_ES7210_ADDR,
+            AUDIO_INPUT_REFERENCE);
+        return &audio_codec;
+    }
+
+    virtual Led *GetLed() override
+    {
+        return led_controller_.GetGreenLed();
+    }
+
+    ~FogSeekEdge()
+    {
+        if (button_monitor_timer_)
+        {
+            esp_timer_stop(button_monitor_timer_);
+            esp_timer_delete(button_monitor_timer_);
+            button_monitor_timer_ = nullptr;
+        }
+
+        if (i2c_bus_)
+        {
+            i2c_del_master_bus(i2c_bus_);
+        }
+    }
+};
+
+DECLARE_BOARD(FogSeekEdge);

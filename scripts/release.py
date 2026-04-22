@@ -5,7 +5,8 @@ import zipfile
 import argparse
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
+from typing import List, Dict
 
 # Switch to project root directory
 os.chdir(Path(__file__).resolve().parent.parent)
@@ -252,7 +253,7 @@ def _resolve_board_config(board_type: str, target: str, sdkconfig_append: list[s
 # Kconfig "select" entries are not automatically applied when we simply append
 # sdkconfig lines from config.json, so add the required dependencies here to
 # mimic menuconfig behaviour.
-_AUTO_SELECT_RULES: dict[str, list[str]] = {
+_AUTO_SELECT_RULES: Dict[str, List[str]] = {
     "CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING": [
         "CONFIG_BT_ENABLED=y",
         "CONFIG_BT_BLUEDROID_ENABLED=y",
@@ -264,9 +265,9 @@ _AUTO_SELECT_RULES: dict[str, list[str]] = {
 }
 
 
-def _apply_auto_selects(sdkconfig_append: list[str]) -> list[str]:
+def _apply_auto_selects(sdkconfig_append: List[str]) -> List[str]:
     """Apply hardcoded auto-select rules to sdkconfig_append."""
-    items: list[str] = []
+    items: List[str] = []
     existing_keys: set[str] = set()
 
     def _append_if_missing(entry: str) -> None:

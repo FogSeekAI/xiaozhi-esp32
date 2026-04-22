@@ -544,6 +544,9 @@ void Application::InitializeProtocol() {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
                     Schedule([display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
+                        // 添加：通知板级转发 TTS 消息
+                        Board::GetInstance().OnChatMessageReceived("assistant", message);
+              
                     });
                 }
             }
@@ -553,6 +556,9 @@ void Application::InitializeProtocol() {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
+                    // 添加：通知板级转发 STT 消息
+                    Board::GetInstance().OnChatMessageReceived("user", message);
+          
                 });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
@@ -560,6 +566,9 @@ void Application::InitializeProtocol() {
             if (cJSON_IsString(emotion)) {
                 Schedule([display, emotion_str = std::string(emotion->valuestring)]() {
                     display->SetEmotion(emotion_str.c_str());
+                    // 添加：通知板级转发情绪消息
+                    Board::GetInstance().OnEmotionReceived(emotion_str);
+           
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {

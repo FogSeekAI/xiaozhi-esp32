@@ -1,0 +1,17 @@
+{
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "fogseek-edge-camera",
+            "sdkconfig_append": [
+                "CONFIG_USE_DEVICE_AEC=y",
+                "CONFIG_SR_WN_WN9_HAIXIAOWU_TTS=y",
+                "CONFIG_IDF_TARGET_ESP32S3=y",
+                "CONFIG_CAMERA_GC0308=y",
+                "CONFIG_CAMERA_GC0308_AUTO_DETECT_DVP_INTERFACE_SENSOR=y",
+                "CONFIG_CAMERA_GC0308_DVP_YUV422_640X480_16FPS=y",
+                "CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE=y"
+            ]
+        }
+    ]
+}

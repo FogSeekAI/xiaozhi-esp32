@@ -82,6 +82,11 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+
+    // 添加消息通知虚函数（默认空实现）
+    virtual void OnChatMessageReceived(const std::string& role, const std::string& content) {}
+    virtual void OnEmotionReceived(const std::string& emotion) {}
+
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \
