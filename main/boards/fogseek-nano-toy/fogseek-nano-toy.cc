@@ -262,11 +262,11 @@ private:
         
         sensor_event_group_ = xEventGroupCreate();
         
-        xTaskCreate(AudioTask, "audio_task", 4096, this, 8, &audio_task_handle_);
+        xTaskCreate(AudioTask, "audio_task", 4096, this, 3, &audio_task_handle_);
         
-        xTaskCreate(MotorTask, "motor_task", 4096, this, 7, &motor_task_handle_);
+        xTaskCreate(MotorTask, "motor_task", 4096, this, 2, &motor_task_handle_);
         
-        xTaskCreate(SensorMonitorTask, "sensor_monitor", 4096, this, 5, NULL);
+        xTaskCreate(SensorMonitorTask, "sensor_monitor", 4096, this, 1, NULL);
         
         ESP_LOGI(TAG, "All sensor tasks started");
     }
@@ -310,16 +310,16 @@ private:
 
         ESP_LOGI(TAG, "Device powered on.");
 
-        motor_controller_.InitializePwmMotor((gpio_num_t)MOTOR_GPIO, 5000);
+        /* motor_controller_.InitializePwmMotor((gpio_num_t)MOTOR_GPIO, 5000);
         
         touch_sensor_1_.InitializeGpioTouch((gpio_num_t)TOUCH_SENSOR_1_GPIO, true, 
                                             nullptr, TOUCH1_PRESSED_EVENT, TOUCH1_RELEASED_EVENT);
         touch_sensor_2_.InitializeCapTouch(TOUCH_SENSOR_2_CHANNEL, TOUCH_SENSOR_2_THRESHOLD_PERCENT);
         
         radar_sensor_.Initialize((gpio_num_t)RADAR_GPIO, true,
-                                sensor_event_group_, RADAR_DETECTED_EVENT, RADAR_CLEAR_EVENT);
+                                sensor_event_group_, RADAR_DETECTED_EVENT, RADAR_CLEAR_EVENT); */
 
-        StartSensorMonitoring();
+        //StartSensorMonitoring();
 
 
         HandleAutoWake();
