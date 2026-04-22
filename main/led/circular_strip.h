@@ -20,7 +20,7 @@ struct StripColor
 class CircularStrip : public Led
 {
 public:
-    CircularStrip(gpio_num_t gpio, uint8_t max_leds);
+    CircularStrip(gpio_num_t gpio, uint16_t max_leds);
     virtual ~CircularStrip();
     led_strip_handle_t led_strip_ = nullptr;
     esp_timer_handle_t strip_timer_ = nullptr;
@@ -29,6 +29,7 @@ public:
     void SetBrightness(uint8_t default_brightness, uint8_t low_brightness);
     void SetAllColor(StripColor color);
     void SetSingleColor(uint8_t index, StripColor color);
+    void SetMultiColors(const std::vector<StripColor>& colors);
     void Blink(StripColor color, int interval_ms);
     void Breathe(StripColor low, StripColor high, int interval_ms);
     void Scroll(StripColor low, StripColor high, int length, int interval_ms);
