@@ -239,7 +239,10 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_LCD_EYES
         bool "Nano LCD Eyes"
-        depends on IDF_TARGET_ESP32S3   
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_DUAL_EYES
+        bool "Fogseek Dual Eyes"
+        depends on IDF_TARGET_ESP32S3     
     config BOARD_TYPE_FOGSEEK_NANO_TOY
         bool "Nano Toy"
         depends on IDF_TARGET_ESP32S3
@@ -643,6 +646,12 @@ choice BOARD_TYPE
         bool "NULLLAB-AI-VOX3"
         depends on IDF_TARGET_ESP32S3
 endchoice
+
+config USE_DUAL_SCREEN
+    bool "Enable dual screen support"
+    default n
+    help
+        Enable support for Fogseek dual screen display
 
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4

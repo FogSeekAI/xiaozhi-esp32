@@ -933,6 +933,11 @@ elseif(CONFIG_BOARD_TYPE_FOGSEEK_NANO_LCD_EYES)
     set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
     set(BUILTIN_ICON_FONT font_awesome_16_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_32)  
+elseif(CONFIG_BOARD_TYPE_FOGSEEK_DUAL_EYES)
+    set(BOARD_TYPE "fogseek-dual-eyes")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
+    set(BUILTIN_ICON_FONT font_awesome_16_4)
+    set(DEFAULT_EMOJI_COLLECTION twemoji_32)
 elseif(CONFIG_BOARD_TYPE_FOGSEEK_NANO_TOY)
     set(BOARD_TYPE "fogseek-nano-toy")
     set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
@@ -1101,7 +1106,9 @@ if(CONFIG_IDF_TARGET_ESP32)
                              "boards/common/dual_network_board.cc"
                              )
 endif()
-
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.c")
+    list(APPEND SOURCES "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.c")
+endif()
 # Include EspVideo if target is ESP32S3 or ESP32P4
 if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4)
     list(APPEND SOURCES "boards/common/esp_video.cc"

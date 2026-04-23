@@ -12,7 +12,6 @@
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
 #include <cstring>
-#include <src/misc/cache/lv_cache.h>
 
 #include "board.h"
 
@@ -89,14 +88,19 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
     esp_timer_create(&preview_timer_args, &preview_timer_);
 }
 
+static bool lvgl_core_initialized = false;
+static int current_instance = 0;
 SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                            int width, int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y, bool swap_xy)
     : LcdDisplay(panel_io, panel, width, height) {
+    current_instance++;
 
     // draw white
-    std::vector<uint16_t> buffer(width_, 0xFFFF);
-    for (int y = 0; y < height_; y++) {
-        esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
+    if (current_instance == 1) {
+        std::vector<uint16_t> buffer(width_, 0xFFFF);
+        for (int y = 0; y < height_; y++) {
+            esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
+        }
     }
 
     // Set the display to on
@@ -110,30 +114,31 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         }
     }
 
-    ESP_LOGI(TAG, "Initialize LVGL library");
-    lv_init();
-
-#if CONFIG_SPIRAM
-    // lv image cache, currently only PNG is supported
-    size_t psram_size_mb = esp_psram_get_size() / 1024 / 1024;
-    if (psram_size_mb >= 8) {
-        lv_image_cache_resize(2 * 1024 * 1024, true);
-        ESP_LOGI(TAG, "Use 2MB of PSRAM for image cache");
-    } else if (psram_size_mb >= 2) {
-        lv_image_cache_resize(512 * 1024, true);
-        ESP_LOGI(TAG, "Use 512KB of PSRAM for image cache");
+    if (!lvgl_core_initialized) {
+        ESP_LOGI(TAG, "Initialize LVGL library");
+        lv_init();
     }
+#if CONFIG_SPIRAM
+        // lv image cache, currently only PNG is supported
+        size_t psram_size_mb = esp_psram_get_size() / 1024 / 1024;
+        if (psram_size_mb >= 8) {
+            //lv_image_cache_resize(2 * 1024 * 1024, true);
+            ESP_LOGI(TAG, "Use 2MB of PSRAM for image cache");
+        } else if (psram_size_mb >= 2) {
+            //lv_image_cache_resize(512 * 1024, true);
+            ESP_LOGI(TAG, "Use 512KB of PSRAM for image cache");
+        }
 #endif
 
-    ESP_LOGI(TAG, "Initialize LVGL port");
-    lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 1;
+        ESP_LOGI(TAG, "Initialize LVGL port");
+        lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+        port_cfg.task_priority = 1;
 #if CONFIG_SOC_CPU_CORES_NUM > 1
-    port_cfg.task_affinity = 1;
+        port_cfg.task_affinity = 1;
 #endif
-    lvgl_port_init(&port_cfg);
-
-    ESP_LOGI(TAG, "Adding LCD display");
+        lvgl_port_init(&port_cfg);
+        
+        lvgl_core_initialized = true;
     const lvgl_port_display_cfg_t display_cfg = {
         .io_handle = panel_io_,
         .panel_handle = panel_,
@@ -159,7 +164,7 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
             .direct_mode = 0,
         },
     };
-
+    
     display_ = lvgl_port_add_disp(&display_cfg);
     if (display_ == nullptr) {
         ESP_LOGE(TAG, "Failed to add display");
@@ -169,6 +174,11 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
+#if CONFIG_USE_DUAL_SCREEN ==1
+    SetupEyesUI(display_);
+#else
+    SetupUI();
+#endif
 }
 
 
@@ -230,6 +240,8 @@ RgbLcdDisplay::RgbLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
+
+    SetupUI();
 }
 
 MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -281,6 +293,8 @@ MipiLcdDisplay::MipiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
+
+    SetupUI();
 }
 
 LcdDisplay::~LcdDisplay() {
@@ -352,13 +366,6 @@ void LcdDisplay::Unlock() {
 
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE
 void LcdDisplay::SetupUI() {
-    // Prevent duplicate calls - if already called, return early
-    if (setup_ui_called_) {
-        ESP_LOGW(TAG, "SetupUI() called multiple times, skipping duplicate call");
-        return;
-    }
-    
-    Display::SetupUI();  // Mark SetupUI as called
     DisplayLockGuard lock(this);
 
     auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
@@ -502,14 +509,8 @@ void LcdDisplay::SetupUI() {
 #define  MAX_MESSAGES 20
 #endif
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
-    if (!setup_ui_called_) {
-        ESP_LOGW(TAG, "SetChatMessage('%s', '%s') called before SetupUI() - message will be lost!", role, content);
-    }
     DisplayLockGuard lock(this);
     if (content_ == nullptr) {
-        if (setup_ui_called_) {
-            ESP_LOGW(TAG, "SetChatMessage('%s', '%s') failed: content_ is nullptr (SetupUI() was called but container not created)", role, content);
-        }
         return;
     }
     
@@ -518,31 +519,25 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     if (child_count >= MAX_MESSAGES) {
         // Delete the oldest message (first child object)
         lv_obj_t* first_child = lv_obj_get_child(content_, 0);
+        lv_obj_t* last_child = lv_obj_get_child(content_, child_count - 1);
         if (first_child != nullptr) {
             lv_obj_del(first_child);
-            // Refresh child count after deletion
-            child_count = lv_obj_get_child_cnt(content_);
         }
-        // Scroll to the last message immediately (get last_child after deletion)
-        if (child_count > 0) {
-            lv_obj_t* last_child = lv_obj_get_child(content_, child_count - 1);
-            if (last_child != nullptr && lv_obj_is_valid(last_child)) {
-                lv_obj_scroll_to_view_recursive(last_child, LV_ANIM_OFF);
-            }
+        // Scroll to the last message immediately
+        if (last_child != nullptr) {
+            lv_obj_scroll_to_view_recursive(last_child, LV_ANIM_OFF);
         }
     }
     
     // Collapse system messages (if it's a system message, check if the last message is also a system message)
     if (strcmp(role, "system") == 0) {
-        // Refresh child count to get accurate count after potential deletion above
-        child_count = lv_obj_get_child_cnt(content_);
         if (child_count > 0) {
             // Get the last message container
             lv_obj_t* last_container = lv_obj_get_child(content_, child_count - 1);
-            if (last_container != nullptr && lv_obj_is_valid(last_container) && lv_obj_get_child_cnt(last_container) > 0) {
+            if (last_container != nullptr && lv_obj_get_child_cnt(last_container) > 0) {
                 // Get the bubble inside the container
                 lv_obj_t* last_bubble = lv_obj_get_child(last_container, 0);
-                if (last_bubble != nullptr && lv_obj_is_valid(last_bubble)) {
+                if (last_bubble != nullptr) {
                     // Check if bubble type is system message
                     void* bubble_type_ptr = lv_obj_get_user_data(last_bubble);
                     if (bubble_type_ptr != nullptr && strcmp((const char*)bubble_type_ptr, "system") == 0) {
@@ -563,6 +558,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     }
 
     auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
+    auto text_font = lvgl_theme->text_font()->font();
 
     // Create a message bubble
     lv_obj_t* msg_bubble = lv_obj_create(content_);
@@ -575,25 +571,28 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_t* msg_text = lv_label_create(msg_bubble);
     lv_label_set_text(msg_text, content);
     
-    // Calculate bubble width constraints
+    // Calculate actual text width
+    lv_coord_t text_width = lv_txt_get_width(content, strlen(content), text_font, 0);
+
+    // Calculate bubble width
     lv_coord_t max_width = LV_HOR_RES * 85 / 100 - 16;  // 85% of screen width
     lv_coord_t min_width = 20;  
-    
-    // Let LVGL calculate the natural text width first
-    lv_obj_set_width(msg_text, LV_SIZE_CONTENT);
-    lv_obj_update_layout(msg_text);
-    lv_coord_t text_width = lv_obj_get_width(msg_text);
+    lv_coord_t bubble_width;
     
     // Ensure text width is not less than minimum width
     if (text_width < min_width) {
         text_width = min_width;
     }
 
-    // Constrain to max width
-    lv_coord_t bubble_width = (text_width < max_width) ? text_width : max_width;
+    // If text width is less than max width, use text width
+    if (text_width < max_width) {
+        bubble_width = text_width; 
+    } else {
+        bubble_width = max_width;
+    }
     
     // Set message text width
-    lv_obj_set_width(msg_text, bubble_width);
+    lv_obj_set_width(msg_text, bubble_width);  // Subtract padding
     lv_label_set_long_mode(msg_text, LV_LABEL_LONG_WRAP);
 
     // Set bubble width
@@ -780,35 +779,55 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     // Auto-scroll to the image bubble
     lv_obj_scroll_to_view_recursive(img_bubble, LV_ANIM_ON);
 }
-
-void LcdDisplay::ClearChatMessages() {
-    DisplayLockGuard lock(this);
-    if (content_ == nullptr) {
-        return;
-    }
-    
-    // Use lv_obj_clean to delete all children of content_ (chat message bubbles)
-    lv_obj_clean(content_);
-    
-    // Reset chat_message_label_ as it has been deleted
-    chat_message_label_ = nullptr;
-    
-    // Show the centered AI logo (emoji_label_) again
-    if (emoji_label_ != nullptr) {
-        lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
-    }
-    
-    ESP_LOGI(TAG, "Chat messages cleared");
-}
 #else
+
+void LcdDisplay::SetupEyesUI(lv_display_t * display_ ) {
+    DisplayLockGuard lock(this);
+    LvglTheme* lvgl_theme = static_cast<LvglTheme*>(current_theme_);
+    auto text_font = lvgl_theme->text_font()->font();
+    auto icon_font = lvgl_theme->icon_font()->font();
+    auto large_icon_font = lvgl_theme->large_icon_font()->font();
+
+    auto screen = lv_display_get_screen_active(display_);
+    //auto screen = lv_screen_active();
+    lv_obj_set_style_text_font(screen, text_font, 0);
+    lv_obj_set_style_text_color(screen, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_bg_color(screen, lvgl_theme->background_color(), 0);
+
+    /* Container - used as background */
+    container_ = lv_obj_create(screen);
+    lv_obj_set_size(container_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_radius(container_, 0, 0);
+    lv_obj_set_style_pad_all(container_, 0, 0);
+    lv_obj_set_style_border_width(container_, 0, 0);
+    lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
+    lv_obj_set_style_border_color(container_, lvgl_theme->border_color(), 0);
+
+    /* Bottom layer: emoji_box_ - centered display */
+    emoji_box_ = lv_obj_create(screen);
+    lv_obj_set_size(emoji_box_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(emoji_box_, 0, 0);
+    lv_obj_set_style_border_width(emoji_box_, 0, 0);
+    lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, 0);
+
+    emoji_label_ = lv_label_create(emoji_box_);
+    lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
+    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(emoji_label_, FONT_AWESOME_MICROCHIP_AI);
+
+    emoji_image_ = lv_img_create(emoji_box_);
+    lv_obj_center(emoji_image_);
+    lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+
+    /* Middle layer: preview_image_ - centered display */
+    preview_image_ = lv_image_create(screen);
+    lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
+    lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+}
+
 void LcdDisplay::SetupUI() {
-    // Prevent duplicate calls - if already called, return early
-    if (setup_ui_called_) {
-        ESP_LOGW(TAG, "SetupUI() called multiple times, skipping duplicate call");
-        return;
-    }
-    
-    Display::SetupUI();  // Mark SetupUI as called
     DisplayLockGuard lock(this);
     LvglTheme* lvgl_theme = static_cast<LvglTheme*>(current_theme_);
     auto text_font = lvgl_theme->text_font()->font();
@@ -924,61 +943,29 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
 
-#if CONFIG_USE_MULTILINE_CHAT_MESSAGE
-    /* Bottom bar - auto height, grows upward with wrapped text */
+    /* Top layer: Bottom bar - fixed at bottom, minimum height 48, height can be adaptive */
     bottom_bar_ = lv_obj_create(screen);
     lv_obj_set_width(bottom_bar_, LV_HOR_RES);
     lv_obj_set_height(bottom_bar_, LV_SIZE_CONTENT);
-    lv_obj_set_style_radius(bottom_bar_, 0, 0);
-    lv_obj_set_style_bg_color(bottom_bar_, lvgl_theme->background_color(), 0);
-    lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_50, 0);
-    lv_obj_set_style_text_color(bottom_bar_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_pad_all(bottom_bar_, lvgl_theme->spacing(4), 0);
-    lv_obj_set_style_border_width(bottom_bar_, 0, 0);
-    lv_obj_set_scrollbar_mode(bottom_bar_, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
-
-    /* chat_message_label_ placed in bottom_bar_, multiline wrapped display */
-    chat_message_label_ = lv_label_create(bottom_bar_);
-    lv_label_set_text(chat_message_label_, "");
-    lv_obj_set_width(chat_message_label_, LV_HOR_RES - lvgl_theme->spacing(8));
-    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
-    lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide until there is content
-#else
-    /* Top layer: Bottom bar - fixed height at bottom */
-    bottom_bar_ = lv_obj_create(screen);
-    lv_obj_set_size(bottom_bar_, LV_HOR_RES, text_font->line_height + lvgl_theme->spacing(8));
+    lv_obj_set_style_min_height(bottom_bar_, 48, 0); // Set minimum height 48
     lv_obj_set_style_radius(bottom_bar_, 0, 0);
     lv_obj_set_style_bg_color(bottom_bar_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_text_color(bottom_bar_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_pad_all(bottom_bar_, 0, 0);
+    lv_obj_set_style_pad_top(bottom_bar_, lvgl_theme->spacing(2), 0);
+    lv_obj_set_style_pad_bottom(bottom_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_left(bottom_bar_, lvgl_theme->spacing(4), 0);
     lv_obj_set_style_pad_right(bottom_bar_, lvgl_theme->spacing(4), 0);
     lv_obj_set_style_border_width(bottom_bar_, 0, 0);
-    lv_obj_set_scrollbar_mode(bottom_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
 
-    /* chat_message_label_ placed in bottom_bar_, single-line horizontal scroll */
+    /* chat_message_label_ placed in bottom_bar_ and vertically centered */
     chat_message_label_ = lv_label_create(bottom_bar_);
     lv_label_set_text(chat_message_label_, "");
-    lv_obj_set_width(chat_message_label_, LV_HOR_RES - lvgl_theme->spacing(8));
-    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(chat_message_label_, LV_HOR_RES - lvgl_theme->spacing(8)); // Subtract left and right padding
+    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP); // Auto wrap mode
+    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0); // Center text alignment
     lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
-    lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0);
-
-    // Start scrolling after a delay (short text won't scroll)
-    static lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_delay(&a, 1000);
-    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-    lv_obj_set_style_anim(chat_message_label_, &a, LV_PART_MAIN);
-    lv_obj_set_style_anim_duration(chat_message_label_, lv_anim_speed_clamped(60, 300, 60000), LV_PART_MAIN);
-    lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);  // Hide until there is content
-#endif
+    lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0); // Vertically and horizontally centered in bottom_bar_
 
     low_battery_popup_ = lv_obj_create(screen);
     lv_obj_set_scrollbar_mode(low_battery_popup_, LV_SCROLLBAR_MODE_OFF);
@@ -1031,54 +1018,23 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
 }
 
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
-    if (!setup_ui_called_) {
-        ESP_LOGW(TAG, "SetChatMessage('%s', '%s') called before SetupUI() - message will be lost!", role, content);
-    }
     DisplayLockGuard lock(this);
     if (chat_message_label_ == nullptr) {
-        if (setup_ui_called_) {
-            ESP_LOGW(TAG, "SetChatMessage('%s', '%s') failed: chat_message_label_ is nullptr (SetupUI() was called but label not created)", role, content);
-        }
         return;
     }
     lv_label_set_text(chat_message_label_, content);
-    // Show bottom_bar_ only when there is content (and subtitle is not globally hidden)
-    if (bottom_bar_ != nullptr) {
-        if (content == nullptr || content[0] == '\0') {
-            lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
-        } else if (!hide_subtitle_) {
-            lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-#if CONFIG_USE_MULTILINE_CHAT_MESSAGE
-    // Re-align bottom_bar_ after text change so it stays anchored to the bottom
-    // as its height adapts to the wrapped content.
-    if (bottom_bar_ != nullptr) {
-        lv_obj_align(bottom_bar_, LV_ALIGN_BOTTOM_MID, 0, 0);
-    }
-#endif
-}
-
-void LcdDisplay::ClearChatMessages() {
-    DisplayLockGuard lock(this);
-    // In non-wechat mode, just clear the chat message label and hide the bar
-    if (chat_message_label_ != nullptr) {
-        lv_label_set_text(chat_message_label_, "");
-    }
-    if (bottom_bar_ != nullptr) {
-        lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
-    }
 }
 #endif
 
 void LcdDisplay::SetEmotion(const char* emotion) {
-    if (!setup_ui_called_) {
-        ESP_LOGW(TAG, "SetEmotion('%s') called before SetupUI() - emotion will not be displayed!", emotion);
+    // Stop any running GIF animation
+    if (gif_controller_) {
+        DisplayLockGuard lock(this);
+        gif_controller_->Stop();
+        gif_controller_.reset();
     }
+    
     if (emoji_image_ == nullptr) {
-        if (setup_ui_called_) {
-            ESP_LOGW(TAG, "SetEmotion('%s') failed: emoji_image_ is nullptr (SetupUI() was called but emoji image not created)", emotion);
-        }
         return;
     }
 
@@ -1088,10 +1044,6 @@ void LcdDisplay::SetEmotion(const char* emotion) {
         const char* utf8 = font_awesome_get_utf8(emotion);
         if (utf8 != nullptr && emoji_label_ != nullptr) {
             DisplayLockGuard lock(this);
-            if (gif_controller_) {
-                gif_controller_->Stop();
-                gif_controller_.reset();
-            }
             lv_label_set_text(emoji_label_, utf8);
             lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
@@ -1100,12 +1052,6 @@ void LcdDisplay::SetEmotion(const char* emotion) {
     }
 
     DisplayLockGuard lock(this);
-    // Stop any running GIF animation in the same lock scope as setting new image
-    // to prevent LVGL from accessing freed image data between operations
-    if (gif_controller_) {
-        gif_controller_->Stop();
-        gif_controller_.reset();
-    }
     if (image->IsGif()) {
         // Create new GIF controller
         gif_controller_ = std::make_unique<LvglGif>(image->image_dsc());
@@ -1150,6 +1096,23 @@ void LcdDisplay::SetEmotion(const char* emotion) {
 }
 
 void LcdDisplay::SetTheme(Theme* theme) {
+
+#if CONFIG_USE_DUAL_SCREEN ==1
+    DisplayLockGuard lock(this);
+    
+    auto lvgl_theme = static_cast<LvglTheme*>(theme);
+
+    lv_obj_t* screen = lv_screen_active();
+
+    if (lvgl_theme->background_image() != nullptr) {
+        lv_obj_set_style_bg_image_src(container_, lvgl_theme->background_image()->image_dsc(), 0);
+    } else {
+        lv_obj_set_style_bg_image_src(container_, nullptr, 0);
+        lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
+    }
+    Display::SetTheme(lvgl_theme);
+
+#else
     DisplayLockGuard lock(this);
     
     auto lvgl_theme = static_cast<LvglTheme*>(theme);
@@ -1199,7 +1162,7 @@ void LcdDisplay::SetTheme(Theme* theme) {
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
 
     // If we have the chat message style, update all message bubbles
-#if CONFIG_USE_WECHAT_MESSAGE_STYLE
+    #if CONFIG_USE_WECHAT_MESSAGE_STYLE
     // Set content background opacity
     lv_obj_set_style_bg_opa(content_, LV_OPA_TRANSP, 0);
 
@@ -1217,7 +1180,7 @@ void LcdDisplay::SetTheme(Theme* theme) {
         if (lv_obj_get_child_cnt(obj) > 0) {
             // Might be a container, check if it's a user or system message container
             // User and system message containers are transparent
-            lv_opa_t bg_opa = lv_obj_get_style_bg_opa(obj, LV_PART_MAIN);
+            lv_opa_t bg_opa = lv_obj_get_style_bg_opa(obj, 0);
             if (bg_opa == LV_OPA_TRANSP) {
                 // This is a user or system message container
                 bubble = lv_obj_get_child(obj, 0);
@@ -1267,7 +1230,7 @@ void LcdDisplay::SetTheme(Theme* theme) {
             ESP_LOGW(TAG, "child[%lu] Bubble type is not found", i);
         }
     }
-#else
+    #else
     // Simple UI mode - just update the main chat message
     if (chat_message_label_ != nullptr) {
         lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
@@ -1282,13 +1245,14 @@ void LcdDisplay::SetTheme(Theme* theme) {
         lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_50, 0);
         lv_obj_set_style_bg_color(bottom_bar_, lvgl_theme->background_color(), 0);
     }
-#endif
+    #endif
     
     // Update low battery popup
     lv_obj_set_style_bg_color(low_battery_popup_, lvgl_theme->low_battery_color(), 0);
 
-    // No errors occurred. Save theme to settings
+    //No errors occurred. Save theme to settings
     Display::SetTheme(lvgl_theme);
+#endif
 }
 
 void LcdDisplay::SetHideSubtitle(bool hide) {
@@ -1300,11 +1264,7 @@ void LcdDisplay::SetHideSubtitle(bool hide) {
         if (hide) {
             lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
         } else {
-            // Only show if there is actual content to display
-            const char* text = (chat_message_label_ != nullptr) ? lv_label_get_text(chat_message_label_) : nullptr;
-            if (text != nullptr && text[0] != '\0') {
-                lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
-            }
+            lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
