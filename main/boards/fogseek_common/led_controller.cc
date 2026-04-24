@@ -566,3 +566,19 @@ void FogSeekLedController::SetWarmLightBrightness(int brightness)
         }
     }
 }
+
+void FogSeekLedController::RunMarqueeLights(int duration_ms)
+{
+    StripColor current_color = rgb_led_strip_->GetCurrentColor();
+    rgb_led_strip_->Scroll({0, 0, 0}, current_color, 1, 100);
+}
+
+void FogSeekLedController::TurnOffRgbLights(int duration_ms)
+{
+    //RgbLedStrip::TurnOffStrip(duration_ms);
+    rgb_led_strip_->TurnOffStrip(duration_ms);
+}
+void FogSeekLedController::StartBreathingEffect(int duration_ms)
+{
+    rgb_led_strip_->StartBreathe(duration_ms);
+}

@@ -18,8 +18,8 @@
 #define LED_RED_GPIO GPIO_NUM_48
 #define LED_GREEN_GPIO GPIO_NUM_47
 
-#define LED_RGB_GPIO GPIO_NUM_3 // 小圆板 GPIO_NUM_3，椭圆板 GPIO_NUM_2
-#define LED_RGB_NUM_LEDS 8  // RGB 灯带 LED 数量
+#define LED_RGB_GPIO GPIO_NUM_43 // 小圆板 GPIO_NUM_3，椭圆板 GPIO_NUM_2
+#define LED_RGB_NUM_LEDS 16  // RGB 灯带 LED 数量
 
 // 音频相关配置
 #define AUDIO_INPUT_SAMPLE_RATE 24000
@@ -41,4 +41,6 @@
 // 舵机相关配置
 #define SERVO_BODY_GPIO GPIO_NUM_5
 
+//电机相关配置
+#define MOTOR_GPIO GPIO_NUM_44
 #endif
