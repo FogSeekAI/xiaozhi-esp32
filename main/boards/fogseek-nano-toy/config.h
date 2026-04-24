@@ -34,14 +34,23 @@
 #define AUDIO_CODEC_PA_PIN GPIO_NUM_38                    // NS4150B功放使能引脚
 #define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR // ES8389默认I2C地址
 
-// 定义 GPIO 引脚
-#define RADAR_GPIO GPIO_NUM_7    // 雷达传感器 IO40
-#define MOTOR_GPIO  GPIO_NUM_8  // 电机控制 IO43
+// TCA6408A IO扩展器配置
+#define TCA6408A_I2C_ADDRESS 0x20  // TCA6408A I2C地址 (ADDR接地)
 
-// 触摸传感器配置
-#define TOUCH_SENSOR_1_GPIO GPIO_NUM_4    // 普通触摸传感器 GPIO44
-#define TOUCH_SENSOR_2_CHANNEL TOUCH_PAD_NUM5  // 电容触摸传感器 GPIO9 (TOUCH_PAD_NUM9)
-#define TOUCH_SENSOR_2_THRESHOLD_PERCENT 0.05f  // 电容触摸阈值百分比 (5%)
+#define I2C_INT_GPIO GPIO_NUM_5 // 中断
+// TCA6408A引脚分配（使用枚举值，与tca6408a_io_expander.h保持一致）
+#define TCA6408A_RADAR_PIN TCA6408A_GPIO_P3  // 雷达传感器连接到P3 (输入)
+#define TCA6408A_MOTOR_PIN TCA6408A_GPIO_P6  // 电机控制连接到P6 (输出)
+#define TCA6408A_TOUCH_PIN TCA6408A_GPIO_P7  // 触摸传感器连接到P7 (输入)
+
+// 配置掩码：P3、P7为输入(1)，P6为输出(0)，其他保持输入(1)
+// 二进制: 1 1 0 1 1 1 1 1 = 0xDF
+#define TCA6408A_CONFIG_MASK 0x88
+
+
+
+
+
 
 
 #endif
