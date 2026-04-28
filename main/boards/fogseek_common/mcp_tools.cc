@@ -14,6 +14,7 @@
 #include <vector>
 #include <tuple>
 
+
 static const char *TAG = "McpTools";
 
 void InitializeSystemMCP(
@@ -368,21 +369,21 @@ void InitializeRgbLedMCP(
                            return response;
                        });
 }
-/*
+
 void InitializeMotorMCP(
     McpServer &mcp_server,
     FogSeekMotorController &motor_controller)
 {
     // 添加直接控制电机状态的工具函数
     mcp_server.AddTool("self.motor.control_motor",
-                       "打开香氛/关闭香氛，用来控制香氛的开关状态，直接控制电机的开关状态，可以启动或停止电机运行，适用于需要立即响应的场景。",
+                       "打开香氛/关闭香氛/打开电机/关闭电机，用来控制香氛的开关状态，直接控制电机的开关状态，可以启动或停止电机运行，适用于需要立即响应的场景。",
                        PropertyList({Property("state", kPropertyTypeBoolean, true)}), // true表示默认值
                        [&motor_controller](const PropertyList &properties) -> ReturnValue
                        {
                            bool state = properties["state"].value<bool>();
 
-                           motor_controller.ControlMotor(state);
-
+                           //motor_controller.ControlMotor(state);
+                           gpio_set_level(GPIO_NUM_5, state ? 1 : 0);
                            ESP_LOGI(TAG, "Motor control - State: %s", state ? "ON" : "OFF");
 
                            std::string response = "{\"success\":true"
@@ -501,7 +502,7 @@ void InitializeFragranceMCP(
                            std::string result = "{\"success\":true,\"level\":\"" + level + "\"}";
                            return result;
                        });
-}*/
+}
 
 void InitializeLightPanelMCP(
     McpServer &mcp_server,
@@ -523,6 +524,49 @@ void InitializeLightPanelMCP(
                            std::string response = "{\"success\":true"
                                                   ",\"state\":" +
                                                   std::string(state ? "true" : "false") + "}";
+                           return response;
+                       });
+}
+
+void InitializeMusicMCP(
+    McpServer &mcp_server)
+{
+    // 添加打开音乐的工具函数
+    mcp_server.AddTool("self.music.play",
+                       "打开音乐播放功能，将设备状态设置为空闲状态以便播放背景音乐。函数会自动将设备切换到空闲状态以播放背景音乐。执行此操作后，请直接结束对话，不要添加额外的确认或说明文字。",
+                       PropertyList(),
+                       [](const PropertyList &properties) -> ReturnValue
+                       {
+                           auto &app = Application::GetInstance();
+                           
+                           // 立即中断当前的说话（如果有）
+                           app.AbortSpeaking(kAbortReasonNone);
+                           
+                           // 将设备状态设置为空闲状态
+                           app.SetDeviceState(kDeviceStateIdle);
+                           
+                           ESP_LOGI(TAG, "Music play - Device state set to IDLE");
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"device_state\":\"idle\"}";
+                           return response;
+                       });
+
+    // 添加关闭音乐的工具函数
+    mcp_server.AddTool("self.music.stop",
+                       "关闭音乐播放功能，将设备状态设置为监听状态以便接收语音指令。",
+                       PropertyList(),
+                       [](const PropertyList &properties) -> ReturnValue
+                       {
+                           auto &app = Application::GetInstance();
+                           
+                           // 将设备状态设置为监听状态
+                           app.SetDeviceState(kDeviceStateListening);
+                           
+                           ESP_LOGI(TAG, "Music stop - Device state set to LISTENING");
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"device_state\":\"listening\"}";
                            return response;
                        });
 }

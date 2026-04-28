@@ -73,7 +73,7 @@ class RgbLedStrip : public CircularStrip
 {
 public:
     RgbLedStrip(gpio_num_t gpio, uint8_t num_leds);
-
+    StripColor GetCurrentColor() const { return current_color_; }
     // 装饰器模式方法并记录当前颜色
     void SetAllColor(StripColor color);
     void SetSingleColor(uint8_t index, StripColor color);
@@ -143,7 +143,10 @@ public:
     GreenLed *GetGreenLed() const { return green_led_; }
     GpioLed *GetColdLight() const { return cold_light_; }
     GpioLed *GetWarmLight() const { return warm_light_; }
-
+    
+    void RunMarqueeLights(int duration_ms);
+    void TurnOffRgbLights(int duration_ms);
+    void StartBreathingEffect(int duration_ms);
 private:
     static const char *TAG; // 日志标签
 

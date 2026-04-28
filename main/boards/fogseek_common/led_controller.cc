@@ -78,14 +78,17 @@ void GreenLed::OnStateChanged()
     {
     case kDeviceStateIdle: // 空闲状态：绿灯呼吸效果
         StartFadeTask();
+        gpio_set_level(GPIO_NUM_43, 1);
         break;
 
     case kDeviceStateListening: // 监听状态：绿灯常亮
         TurnOn();
+        gpio_set_level(GPIO_NUM_43, 0);
         break;
 
     case kDeviceStateSpeaking: // 说话状态：绿灯1000ms间隔连续闪烁
         StartContinuousBlink(800);
+        gpio_set_level(GPIO_NUM_43, 0);
         break;
 
     case kDeviceStateStarting:        // 启动状态
@@ -565,4 +568,20 @@ void FogSeekLedController::SetWarmLightBrightness(int brightness)
             warm_light_->TurnOff();
         }
     }
+}
+
+void FogSeekLedController::RunMarqueeLights(int duration_ms)
+{
+    StripColor current_color = rgb_led_strip_->GetCurrentColor();
+    rgb_led_strip_->Scroll({0, 0, 0}, current_color, 1, 100);
+}
+
+void FogSeekLedController::TurnOffRgbLights(int duration_ms)
+{
+    //RgbLedStrip::TurnOffStrip(duration_ms);
+    rgb_led_strip_->TurnOffStrip(duration_ms);
+}
+void FogSeekLedController::StartBreathingEffect(int duration_ms)
+{
+    rgb_led_strip_->StartBreathe(duration_ms);
 }

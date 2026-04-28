@@ -217,6 +217,12 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO_WOODLIGHT
         bool "Zhumian WoodLight"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_NANO_WOODLIGHT_EXTEND
+        bool "Zhumian WoodLight Extend"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_NANO_BLUETOOTH_SPEAKER
+        bool "Fogseek Bluetooth Speaker"
+        depends on IDF_TARGET_ESP32S3        
     config BOARD_TYPE_FOGSEEK_NANO_GLOWBIES
         bool "Glowbies"
         depends on IDF_TARGET_ESP32S3
@@ -763,7 +769,7 @@ config USE_DEVICE_AEC
         || BOARD_TYPE_FOGSEEK_NANO_SPIN || BOARD_TYPE_FOGSEEK_NANO_SPIN_4G || BOARD_TYPE_FOGSEEK_NANO_XIAOYA || BOARD_TYPE_FOGSEEK_NANO_MISTLIGHT || BOARD_TYPE_FOGSEEK_NANO_GLOWBIES || BOARD_TYPE_FOGSEEK_GLOWBIES \
         || BOARD_TYPE_FOGSEEK_NANO_DODOPET || BOARD_TYPE_FOGSEEK_NANO_WOODLIGHT || BOARD_TYPE_FOGSEEK_NANO_Angel \
         || BOARD_TYPE_FOGSEEK_EDGE_LINKBIT_LUMI \
-        || BOARD_TYPE_FOGSEEK_EDGE || BOARD_TYPE_FOGSEEK_EDGE_LCD1_8 || BOARD_TYPE_FOGSEEK_EDGE_ESP15F )
+        || BOARD_TYPE_FOGSEEK_EDGE || BOARD_TYPE_FOGSEEK_EDGE_LCD1_8 || BOARD_TYPE_FOGSEEK_EDGE_ESP15F || BOARD_TYPE_FOGSEEK_NANO_BLUETOOTH_SPEAKER||BOARD_TYPE_FOGSEEK_NANO_WOODLIGHT_EXTEND)
     help
         To work properly, device-side AEC requires a clean output reference path from the speaker signal and physical acoustic isolation between the microphone and speaker.
 

@@ -14,12 +14,11 @@
 #define BATTERY_ADC_GPIO GPIO_NUM_10      // 电池电压检测ADC1_CH9
 #define EXT_POWER_ENABLE_GPIO GPIO_NUM_40 // 扩展板电源使能引脚GPIO_NUM_9，灯光板按键测试GPIO_NUM_40
 
-// LED 相关配置
+// LED相关配置
 #define LED_RED_GPIO GPIO_NUM_48
 #define LED_GREEN_GPIO GPIO_NUM_47
 
-#define LED_RGB_GPIO GPIO_NUM_3 // 小圆板 GPIO_NUM_3，椭圆板 GPIO_NUM_2
-#define LED_RGB_NUM_LEDS 8  // RGB 灯带 LED 数量
+#define LCD_BL_GPIO GPIO_NUM_8 // 背光引脚，控制灯光板
 
 // 音频相关配置
 #define AUDIO_INPUT_SAMPLE_RATE 24000
@@ -37,9 +36,6 @@
 
 #define AUDIO_CODEC_PA_PIN GPIO_NUM_41 // NS4150B功放使能引脚
 #define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR
-
-// 舵机相关配置
-#define SERVO_BODY_GPIO GPIO_NUM_5
 
 #define MOTOR_GPIO GPIO_NUM_5
 #endif

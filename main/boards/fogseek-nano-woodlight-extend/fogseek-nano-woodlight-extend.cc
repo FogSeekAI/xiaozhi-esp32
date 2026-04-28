@@ -20,23 +20,21 @@
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
 
-#define TAG "FogSeekNanoMistLight"
+#define TAG "FogSeekNanoWoodLightExtend"
 
-class FogSeekNanoMistLight : public WifiBoard
+class FogSeekNanoWoodLightExtend : public WifiBoard
 {
 private:
     Button boot_button_;
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-    FogSeekMotorController motor_controller_;                                      // 添加电机控制器
-    FragranceController fragrance_controller_{led_controller_, motor_controller_}; // 香氛控制器
-
-    CircularStrip *rgb_led_strip_ = nullptr;
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
-
+    bool light_state_ = true; // 跟踪灯光状态
+    FogSeekMotorController motor_controller_;                                      // 添加电机控制器
+    FragranceController fragrance_controller_{led_controller_, motor_controller_}; // 香氛控制器
     // 初始化I2C外设
     void InitializeI2c()
     {
@@ -66,27 +64,30 @@ private:
         power_manager_.Initialize(&power_pin_config);
     }
 
-    // 初始化LED 控制器
+    // 初始化香氛电机控制引脚
+    void InitializeMotorControls()
+    {
+        // 初始化电机控制器
+        // motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
+        // gpio_set_level(MOTOR_GPIO, 0);
+        // ESP_LOGI(TAG, "GPIO controls initialized: MOTOR=%d", MOTOR_GPIO);
+        motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
+        gpio_config_t io_conf;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pin_bit_mask = (1ULL << MOTOR_GPIO);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(MOTOR_GPIO, 1); 
+    }
+    // 初始化LED控制器
     void InitializeLedController()
     {
         led_pin_config_t led_pin_config = {
             .red_gpio = LED_RED_GPIO,
-            .green_gpio = LED_GREEN_GPIO,
-            .rgb_gpio = LED_RGB_GPIO,
-            .rgb_num_leds = LED_RGB_NUM_LEDS};
+            .green_gpio = LED_GREEN_GPIO};
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
-
-        // 从 LED 控制器获取 RGB 灯带实例
-        rgb_led_strip_ = led_controller_.GetRgbLedStrip();
-    }
-
- // 初始化香氛电机控制引脚
-    void InitializeGpioControls()
-    {
-        // 初始化电机控制器
-        motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
-
-        ESP_LOGI(TAG, "GPIO controls initialized: MOTOR=%d", MOTOR_GPIO);
     }
 
     // 初始化音频功放引脚并默认关闭功放
@@ -108,70 +109,44 @@ private:
         gpio_set_level(AUDIO_CODEC_PA_PIN, enable ? 1 : 0);
     }
 
-    // 初始化扩展板电源使能引脚
-    void InitializeExtensionPowerEnable()
+    // 初始化灯光板电源使能引脚
+    void InitializeLightController()
     {
         gpio_config_t io_conf;
         io_conf.intr_type = GPIO_INTR_DISABLE;
         io_conf.mode = GPIO_MODE_OUTPUT;
-        io_conf.pin_bit_mask = (1ULL << EXT_POWER_ENABLE_GPIO);
+        io_conf.pin_bit_mask = (1ULL << LCD_BL_GPIO);
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
         gpio_config(&io_conf);
-        SetExtensionPowerEnableState(false); // 默认关闭扩展板电源使能
+        gpio_set_level(LCD_BL_GPIO, 0); 
+        //SetLightState(true); // 默认关闭状态（高电平）
     }
 
-    // 设置扩展板电源使能状态
-    void SetExtensionPowerEnableState(bool enable)
+    // 设置灯光板电源使能状态（低电平打开，高电平关闭）
+    void SetLightState(bool enable)
     {
-        gpio_set_level(EXT_POWER_ENABLE_GPIO, enable ? 1 : 0);
+        // 由于硬件使用三极管，低电平导通，所以逻辑要反转
+        gpio_set_level(LCD_BL_GPIO, enable ? 0 : 1); // true时输出低电平，false时输出高电平
     }
 
     // 初始化按键回调
     void InitializeButtonCallbacks()
     {
         ctrl_button_.OnClick([this]()
-                             {
-                                //  servo_controller_.SetAngle(45);
-                                //  // 延时500ms后返回到90度位置
-                                //  vTaskDelay(pdMS_TO_TICKS(500));
-                                //  servo_controller_.SetAngle(90);
-                                //  // 循环切换RGB灯带颜色
-                                //  static int color_index = 0;
-                                //  switch (color_index)
-                                //  {
-                                //  case 0:
-                                //      rgb_led_strip_->SetAllColor({255, 0, 255}); // 紫色
-                                //      break;
-                                //  case 1:
-                                //      rgb_led_strip_->SetAllColor({0, 255, 0}); // 绿色
-                                //      break;
-                                //  case 2:
-                                //      rgb_led_strip_->SetAllColor({255, 255, 0}); // 黄色
-                                //      break;
-                                //  case 3:
-                                //      rgb_led_strip_->SetAllColor({0, 0, 255}); // 蓝色
-                                //      break;
-                                //  case 4:
-                                //      rgb_led_strip_->SetAllColor({255, 165, 0}); // 橙色
-                                //      break;
-                                //  case 5:
-                                //      rgb_led_strip_->SetAllColor({0, 255, 255}); // 青色
-                                //      break;
-                                //  default:
-                                //      rgb_led_strip_->SetAllColor({255, 255, 255}); // 白色
-                                //      break;
-                                //  }
-                                //  color_index = (color_index + 1) % 7; // 循环使用7种颜色
-
+                            {
+                                SetLightState(false);
+                                gpio_set_level(MOTOR_GPIO, 0);
+                                 //同时切换聊天状态（保持原有功能）
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
-                                   {
-                                    rgb_led_strip_->SetAllColor({0, 0, 0}); // 关灯
-                                    auto &app = Application::GetInstance();
-                                    if (app.GetDeviceState() == kDeviceStateStarting)
+                            {
+                                SetLightState(true);
+                                gpio_set_level(MOTOR_GPIO, 1);
+                                auto &app = Application::GetInstance();
+                                if (app.GetDeviceState() == kDeviceStateStarting)
                                     {
                                         EnterWifiConfigMode();
                                         return;
@@ -211,7 +186,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNanoMistLight *>(arg);
+                auto instance = static_cast<FogSeekNanoWoodLightExtend *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -231,8 +206,6 @@ private:
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
         SetAudioAmplifierState(true);
 
-        SetExtensionPowerEnableState(true); // 开机时打开扩展板电源使能
-
         ESP_LOGI(TAG, "Device powered on.");
 
         HandleAutoWake(); // 开机自动唤醒
@@ -241,9 +214,6 @@ private:
     // 关机流程
     void PowerOff()
     {
-        SetExtensionPowerEnableState(false); // 关机时关闭扩展板电源使能
-        rgb_led_strip_->SetAllColor({0, 0, 0});
-
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
@@ -255,16 +225,20 @@ private:
 
         ESP_LOGI(TAG, "Device powered off.");
     }
+
     // 初始化MCP工具
     void InitializeMCP()
     {
         // 获取MCP服务器实例
         auto &mcp_server = McpServer::GetInstance();
 
-        // 初始化RGB LED MCP工具
-        InitializeRgbLedMCP(mcp_server, led_controller_);
         // 初始化系统级MCP工具（如关机功能）
         InitializeSystemMCP(mcp_server, power_manager_);
+
+        // 初始化灯光板MCP工具
+        InitializeLightPanelMCP(mcp_server, [this](bool state)
+                                { this->SetLightState(state); });
+
         // 初始化电机MCP工具（如关机功能）
         InitializeMotorMCP(mcp_server, motor_controller_);
         // 初始化香氛控制相关的MCP工具
@@ -272,17 +246,16 @@ private:
     }
 
 public:
-    FogSeekNanoMistLight() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekNanoWoodLightExtend() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
+        InitializeLightController();
         InitializeAudioAmplifier();
-        InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
         InitializeMCP();
-        InitializeGpioControls();
-
+        InitializeMotorControls();
         // 设置电源状态变化回调函数
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
@@ -305,27 +278,20 @@ public:
             AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
-            GPIO_NUM_NC,
+            AUDIO_CODEC_PA_PIN,
             AUDIO_CODEC_ES8389_ADDR,
             true,
             true);
         return &audio_codec;
     }
 
-    ~FogSeekNanoMistLight()
+    ~FogSeekNanoWoodLightExtend()
     {
         if (i2c_bus_)
         {
             i2c_del_master_bus(i2c_bus_);
         }
-
-        // 删除RGB灯带对象
-        if (rgb_led_strip_)
-        {
-            delete rgb_led_strip_;
-            rgb_led_strip_ = nullptr;
-        }
     }
 };
 
-DECLARE_BOARD(FogSeekNanoMistLight);
+DECLARE_BOARD(FogSeekNanoWoodLightExtend);
