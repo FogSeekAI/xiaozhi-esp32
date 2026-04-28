@@ -224,7 +224,34 @@ private:
 
 
 
-    
+    void InitializeTools() {
+        auto& mcp_server = McpServer::GetInstance();
+        
+        mcp_server.AddTool("self.toy.set_motor",
+            "Control the toy's motor (vibration motor). Use this to turn the motor on or off.",
+            PropertyList({
+                Property("enabled", kPropertyTypeBoolean)
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                bool enabled = properties["enabled"].value<bool>();
+                SetMotorState(enabled);
+                motor_enabled_ = enabled;
+                
+                ESP_LOGI(TAG, "Motor controlled via voice: %s", enabled ? "ON" : "OFF");
+                return true;
+            });
+        
+        mcp_server.AddTool("self.toy.get_motor_status",
+            "Get the current status of the toy's motor.",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                cJSON* json = cJSON_CreateObject();
+                cJSON_AddBoolToObject(json, "motor_enabled", motor_enabled_);
+                cJSON_AddStringToObject(json, "status", motor_enabled_ ? "on" : "off");
+                return json;
+            });
+    }
+
 
 
 
@@ -604,7 +631,7 @@ public:
         InitializeLedController();
         InitializeAudioAmplifier();
         InitializeButtonCallbacks();
-
+        InitializeTools();
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
     }
