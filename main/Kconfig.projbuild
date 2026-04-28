@@ -242,7 +242,10 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_DUAL_EYES
         bool "Fogseek Dual Eyes"
-        depends on IDF_TARGET_ESP32S3     
+        depends on IDF_TARGET_ESP32S3   
+    config BOARD_TYPE_FOGSEEK_DUAL_EYES_EXPAND
+        bool "Fogseek Dual Eyes Expand"
+        depends on IDF_TARGET_ESP32S3   
     config BOARD_TYPE_FOGSEEK_NANO_TOY
         bool "Nano Toy"
         depends on IDF_TARGET_ESP32S3

@@ -164,7 +164,10 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
             .direct_mode = 0,
         },
     };
-    
+    ESP_LOGI(TAG, "=== Debug: Before lvgl_port_add_disp ===");
+    ESP_LOGI(TAG, "io_handle: %p", display_cfg.io_handle);
+    ESP_LOGI(TAG, "panel_handle: %p", display_cfg.panel_handle);
+    ESP_LOGI(TAG, "width: %d, height: %d", width, height);
     display_ = lvgl_port_add_disp(&display_cfg);
     if (display_ == nullptr) {
         ESP_LOGE(TAG, "Failed to add display");
