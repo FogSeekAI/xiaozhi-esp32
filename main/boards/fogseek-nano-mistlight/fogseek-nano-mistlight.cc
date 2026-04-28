@@ -29,7 +29,9 @@ private:
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
-    FogSeekMotorController servo_controller_;
+    FogSeekMotorController motor_controller_;                                      // 添加电机控制器
+    FragranceController fragrance_controller_{led_controller_, motor_controller_}; // 香氛控制器
+
     CircularStrip *rgb_led_strip_ = nullptr;
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
@@ -78,16 +80,13 @@ private:
         rgb_led_strip_ = led_controller_.GetRgbLedStrip();
     }
 
-    // 初始化舵机控制器
-    void InitializeServoController()
+ // 初始化香氛电机控制引脚
+    void InitializeGpioControls()
     {
-        // 使用配置文件中定义的舵机控制引脚 (GPIO_NUM_5)
-        servo_controller_.InitializeServo(SERVO_BODY_GPIO);
+        // 初始化电机控制器
+        motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
 
-        // 设置舵机初始位置
-        servo_controller_.SetAngle(90); // 90度位置（中间）
-
-        ESP_LOGI(TAG, "Servo controller initialized on GPIO %d.", SERVO_BODY_GPIO);
+        ESP_LOGI(TAG, "GPIO controls initialized: MOTOR=%d", MOTOR_GPIO);
     }
 
     // 初始化音频功放引脚并默认关闭功放
@@ -133,11 +132,10 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 servo_controller_.SetAngle(45);
+                                 //servo_controller_.SetAngle(45);
                                  // 延时500ms后返回到90度位置
                                  vTaskDelay(pdMS_TO_TICKS(500));
-                                 servo_controller_.SetAngle(90);
-
+                                 //servo_controller_.SetAngle(90);
                                  // 循环切换RGB灯带颜色
                                  static int color_index = 0;
                                  switch (color_index)
@@ -257,18 +255,20 @@ private:
 
         ESP_LOGI(TAG, "Device powered off.");
     }
-
     // 初始化MCP工具
     void InitializeMCP()
     {
         // 获取MCP服务器实例
         auto &mcp_server = McpServer::GetInstance();
 
-        // 初始化RGB LED MCP 工具
-        InitializeRgbLedMCP(mcp_server, rgb_led_strip_);
-
+        // 初始化RGB LED MCP工具
+        InitializeRgbLedMCP(mcp_server, led_controller_);
         // 初始化系统级MCP工具（如关机功能）
         InitializeSystemMCP(mcp_server, power_manager_);
+        // 初始化电机MCP工具（如关机功能）
+        InitializeMotorMCP(mcp_server, motor_controller_);
+        // 初始化香氛控制相关的MCP工具
+        InitializeFragranceMCP(mcp_server, fragrance_controller_);
     }
 
 public:
@@ -281,7 +281,7 @@ public:
         InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
         InitializeMCP();
-        InitializeServoController();
+        InitializeGpioControls();
 
         // 设置电源状态变化回调函数
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)

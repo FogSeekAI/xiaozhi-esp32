@@ -51,6 +51,7 @@ private:
     void StopCycleTimer();
     void CycleTimerCallback();
     void StopCurrentMode();
+
 };
 
-#endif // _FRAGRANCE_CONTROLLER_H_
+#endif // _FRAGRANCE_CONTROLLER_H_d
