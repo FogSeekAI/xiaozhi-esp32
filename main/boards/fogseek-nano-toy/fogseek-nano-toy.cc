@@ -49,10 +49,11 @@ private:
     std::chrono::steady_clock::time_point last_touch_trigger_time_;
     std::chrono::steady_clock::time_point last_radar_left_time_;
     bool radar_first_detection_ = true;
-    static constexpr int RADAR_DETECTION_INTERVAL_SEC = 60;
+    static constexpr int RADAR_DETECTION_INTERVAL_SEC = 30;
     static constexpr int TOUCH_TRIGGER_INTERVAL_SEC = 5;
     
     bool motor_enabled_ = false;
+    esp_timer_handle_t motor_timer_ = nullptr;
 
     EventGroupHandle_t sensor_event_group_ = nullptr;
     static constexpr uint32_t TOUCH_PRESSED_EVENT = BIT0;
@@ -67,7 +68,24 @@ private:
     char log_buffer_[LOG_BUFFER_SIZE];
 
     
-    
+    void StartMotorPulse() {
+        if (motor_timer_ != nullptr) {
+            esp_timer_stop(motor_timer_);
+        }
+        
+        SetMotorState(true);
+        motor_enabled_ = true;
+        ESP_LOGI(TAG, "Motor pulse started (will auto-stop in 2 seconds)");
+        
+        esp_timer_start_once(motor_timer_, 2000000);
+    }
+
+    static void MotorTimerCallback(void* arg) {
+        auto instance = static_cast<FogSeekNanoToy*>(arg);
+        instance->SetMotorState(false);
+        instance->motor_enabled_ = false;
+        ESP_LOGI(TAG, "Motor pulse completed (auto-stopped)");
+    }
 
 
     void InitializeI2c()
@@ -408,12 +426,10 @@ private:
                                          pdMS_TO_TICKS(10));
             
             if (events & instance->MOTOR_TOGGLE_EVENT) {
-                instance->motor_enabled_ = !instance->motor_enabled_;
-                uint8_t level = instance->motor_enabled_ ? 1 : 0;
-                tca6408a_set_gpio_level(&instance->tca6408a_handle_, TCA6408A_GPIO_P6, level);
-                ESP_LOGI(TAG, "MotorTask: Motor toggled to %s (level=%d)", 
-                        instance->motor_enabled_ ? "ON" : "OFF", level);
+                instance->StartMotorPulse();
+                ESP_LOGI(TAG, "MotorTask: Motor pulse triggered by sensor event");
             }
+            
             else if (events & instance->RADAR_DETECTED_EVENT) {
                 bool should_notify = false;
                 
@@ -437,7 +453,8 @@ private:
                 }
                 
                 if (should_notify) {
-                    ESP_LOGI(TAG, "MotorTask: Radar detected person, triggering AI");
+                    instance->StartMotorPulse();
+                    ESP_LOGI(TAG, "MotorTask: Radar detected person, triggering AI and motor pulse");
                     auto& app = Application::GetInstance();
                     
                     DeviceState current_state = app.GetDeviceState();
@@ -550,6 +567,13 @@ private:
         
         ESP_LOGI(TAG, "Initial states - Touch: %d, Radar: %d, Motor: OFF", 
                 last_touch_state_ ? 1 : 0, last_radar_state_ ? 1 : 0);
+        
+        esp_timer_create_args_t motor_timer_args = {};
+        motor_timer_args.callback = MotorTimerCallback;
+        motor_timer_args.arg = this;
+        motor_timer_args.name = "motor_timer";
+        motor_timer_args.dispatch_method = ESP_TIMER_TASK;
+        esp_timer_create(&motor_timer_args, &motor_timer_);
         
         sensor_event_group_ = xEventGroupCreate();
         
@@ -680,6 +704,11 @@ public:
     {
         if (check_idle_timer_) {
             esp_timer_delete(check_idle_timer_);
+        }
+
+        if (motor_timer_) {
+            esp_timer_stop(motor_timer_);
+            esp_timer_delete(motor_timer_);
         }
         
         if (sensor_event_group_) {
