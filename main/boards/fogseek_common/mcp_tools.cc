@@ -368,7 +368,7 @@ void InitializeRgbLedMCP(
                            return response;
                        });
 }
-/*
+
 void InitializeMotorMCP(
     McpServer &mcp_server,
     FogSeekMotorController &motor_controller)
@@ -501,7 +501,7 @@ void InitializeFragranceMCP(
                            std::string result = "{\"success\":true,\"level\":\"" + level + "\"}";
                            return result;
                        });
-}*/
+}
 
 void InitializeLightPanelMCP(
     McpServer &mcp_server,

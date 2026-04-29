@@ -239,6 +239,12 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_LCD_EYES
         bool "Nano LCD Eyes"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_DUAL_EYES
+        bool "Fogseek Dual Eyes"
+        depends on IDF_TARGET_ESP32S3   
+    config BOARD_TYPE_FOGSEEK_DUAL_EYES_EXPAND
+        bool "Fogseek Dual Eyes Expand"
         depends on IDF_TARGET_ESP32S3   
     config BOARD_TYPE_FOGSEEK_NANO_TOY
         bool "Nano Toy"
@@ -644,6 +650,12 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
 endchoice
 
+config USE_DUAL_SCREEN
+    bool "Enable dual screen support"
+    default n
+    help
+        Enable support for Fogseek dual screen display
+
 choice
     depends on BOARD_TYPE_LILYGO_T_DISPLAY_P4
     prompt "Select the screen type"
@@ -913,6 +925,7 @@ config USE_DEVICE_AEC
         || BOARD_TYPE_FOGSEEK_NANO_DODOPET || BOARD_TYPE_FOGSEEK_NANO_WOODLIGHT || BOARD_TYPE_FOGSEEK_NANO_Angel \
         || BOARD_TYPE_FOGSEEK_EDGE_LINKBIT_LUMI \
         || BOARD_TYPE_FOGSEEK_EDGE || BOARD_TYPE_FOGSEEK_EDGE_LCD1_8 || BOARD_TYPE_FOGSEEK_EDGE_ESP15F \
+        ||BOARD_TYPE_FOGSEEK_DUAL_EYES_EXPAND \
         || BOARD_TYPE_FOGSEEK_NANO_TOY )
     help
         To work properly, device-side AEC requires a clean output reference path from the speaker signal and physical acoustic isolation between the microphone and speaker.
