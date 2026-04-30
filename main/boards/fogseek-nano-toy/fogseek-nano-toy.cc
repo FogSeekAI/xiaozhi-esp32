@@ -1,6 +1,7 @@
 #include "wifi_board.h"
 #include "config.h"
 #include "power_manager.h"
+#include "display_manager.h"
 #include "led_controller.h"
 #include "codecs/es8389_audio_codec.h"
 #include "system_reset.h"
@@ -13,26 +14,102 @@
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
 #include "tca6408a_io_expander.h"
+#include "tca6408a_interrupt_manager.h"
+#include "tca6408a_button.h"
+#include "tca6408a_power_manager.h"
+#include "mcp_tools.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
+#include <driver/spi_master.h>
 #include <freertos/task.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
+#include <esp_err.h>
+#include <nvs.h>
+#include <nvs_flash.h>
+#include <esp_event.h>
+#include <esp_lcd_panel_io.h>
+#include <esp_lcd_panel_ops.h>
+#include <esp_lvgl_port.h>
+#include <esp_lcd_io_spi.h>
+#include <esp_lcd_panel_vendor.h>
+#include <esp_lcd_panel_io_additions.h>
+#include "../esp_lcd_panel_io_spi_expander/esp_lcd_panel_io_spi_expander.h"
+#include "board.h"
+#include "display/lcd_display.h"
+#include "lvgl_theme.h"
+#include "settings.h"
+#include "backlight.h"
+#include "assets.h"
+#include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
 #include <sstream>
 #include <chrono>
 
 
 #define TAG "FogSeekNanoToy"
 
+class DualDisplayEmotionOnly : public Display {
+private:
+    SemaphoreHandle_t mutex_ = nullptr; // 添加互斥锁
 
+public:
+    SpiLcdDisplay* display_1_ = nullptr;
+    SpiLcdDisplay* display_2_ = nullptr;
+
+    DualDisplayEmotionOnly(SpiLcdDisplay* disp1, SpiLcdDisplay* disp2)
+        : display_1_(disp1), display_2_(disp2) {
+            mutex_ = xSemaphoreCreateMutex();
+            if (!mutex_) {
+            ESP_LOGE(TAG, "Failed to create display mutex!");
+        }
+            // if (display_1_ && display_2_) 
+            // {
+            //     display_1_->SetTheme(display_2_->GetTheme());
+            // }
+    }
+    ~DualDisplayEmotionOnly() {
+        if (mutex_) {
+            vSemaphoreDelete(mutex_);
+        }
+    }
+    void SetEmotion(const char* emotion) override {
+
+        if (display_1_) {
+            display_1_->SetEmotion(emotion);
+            //vTaskDelay(pdMS_TO_TICKS(100)); 
+        }
+        if (display_2_) {
+            display_2_->SetEmotion(emotion);
+        }
+    }
+
+    void SetTheme(Theme* theme) override {
+        if (display_1_) display_1_->SetTheme(theme);
+        if (display_2_) display_2_->SetTheme(theme);
+    }
+
+public:
+    bool Lock(int timeout_ms = 0) override {
+        if (!mutex_) return false;
+        TickType_t ticks = timeout_ms == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
+        return xSemaphoreTake(mutex_, ticks) == pdTRUE;
+    }
+
+    void Unlock() override {
+        if (mutex_) {
+            xSemaphoreGive(mutex_);
+        }
+    }
+};
 class FogSeekNanoToy : public WifiBoard
 {
 private:
     Button boot_button_;
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
+    FogSeekDisplayManager display_manager_;
     FogSeekLedController led_controller_;
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
@@ -49,8 +126,8 @@ private:
     std::chrono::steady_clock::time_point last_touch_trigger_time_;
     std::chrono::steady_clock::time_point last_radar_left_time_;
     bool radar_first_detection_ = true;
-    static constexpr int RADAR_DETECTION_INTERVAL_SEC = 30;
-    static constexpr int TOUCH_TRIGGER_INTERVAL_SEC = 5;
+    static constexpr int RADAR_DETECTION_INTERVAL_SEC = 180;
+    static constexpr int TOUCH_TRIGGER_INTERVAL_SEC = 8;
     
     bool motor_enabled_ = false;
     esp_timer_handle_t motor_timer_ = nullptr;
@@ -61,12 +138,24 @@ private:
     static constexpr uint32_t LOW_BATTERY_EVENT = BIT2;
     static constexpr uint32_t MOTOR_TOGGLE_EVENT = BIT3;
 
+
+    SpiLcdDisplay* display_1=nullptr;
+    SpiLcdDisplay* display_2=nullptr;
+    DualDisplayEmotionOnly* dual_display_ = nullptr; 
+
     TaskHandle_t audio_task_handle_ = nullptr;
     TaskHandle_t motor_task_handle_ = nullptr;
 
     static constexpr int LOG_BUFFER_SIZE = 256;
     char log_buffer_[LOG_BUFFER_SIZE];
-
+    
+    std::chrono::steady_clock::time_point last_motor_trigger_time_;
+    bool user_interaction_detected_ = false;
+    bool greeting_sent_ = false;
+    bool vitality_displayed_ = false;
+    static constexpr int GREETING_TIMEOUT_SEC = 60;
+    static constexpr int VITALITY_DISPLAY_INTERVAL_SEC = 300;
+    
     
     void StartMotorPulse() {
         if (motor_timer_ != nullptr) {
@@ -110,8 +199,8 @@ private:
         tca6408a_config_t tca6408a_config = {
             .i2c_bus = i2c_bus_,
             .i2c_address = 0x20,
-            .int_gpio = I2C_INT_GPIO,
-            .reset_gpio = GPIO_NUM_NC};
+            
+            .reset_gpio = GPIO_NUM_5};
 
         esp_err_t ret = tca6408a_init(&tca6408a_handle_, &tca6408a_config);
         if (ret != ESP_OK)
@@ -125,7 +214,7 @@ private:
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P3, TCA6408A_DIR_INPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P6, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P7, TCA6408A_DIR_INPUT);
-        
+        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P0, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_GPIO_P6, 0);
         
         ESP_LOGI(TAG, "Tca6408a initialized successfully");
@@ -219,8 +308,16 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 auto &app = Application::GetInstance();
-                                 app.ToggleChatState();
+                                 auto codec = GetAudioCodec();
+                                 int current_volume = codec->output_volume();
+                                 
+                                 if (current_volume > 0) {
+                                     codec->SetOutputVolume(0);
+                                     ESP_LOGI(TAG, "Muted - Volume set to 0");
+                                 } else {
+                                     codec->SetOutputVolume(70);
+                                     ESP_LOGI(TAG, "Unmuted - Volume set to 70");
+                                 }
                             
                              });
         ctrl_button_.OnDoubleClick([this]()
@@ -270,7 +367,89 @@ private:
             });
     }
 
+     // 初始化显示管理器
+    void InitializeDisplayManager()
+    {
+        esp_lcd_panel_io_handle_t panel_io_1 = nullptr;
+        esp_lcd_panel_handle_t panel_1 = nullptr;
+        esp_lcd_panel_io_handle_t panel_io_2 = nullptr;
+        esp_lcd_panel_handle_t panel_2 = nullptr;
+        
+        spi_bus_config_t buscfg = {};
+            buscfg.mosi_io_num = DISPLAY_SPI_MOSI_GPIO;
+            buscfg.miso_io_num = GPIO_NUM_NC;
+            buscfg.sclk_io_num = DISPLAY_SPI_SCLK_GPIO;
+            buscfg.quadwp_io_num = GPIO_NUM_NC;
+            buscfg.quadhd_io_num = GPIO_NUM_NC;
+            buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
+        esp_lcd_panel_io_spi_expander_config_t io_config_1 = {
+            .pclk_hz = 40 * 1000 * 1000,
+            .spi_mode = 0,
+            .trans_queue_depth = 10,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+            .dc_gpio_num = DISPLAY_GC9D01_DC_GPIO,
+            .cs_expander_pin = DISPLAY_SPI_CS_1_GPIO,
+            .bl_pin = DISPLAY_GC9D01_BL_GPIO,
+            .bl_use_expander = true,
+            .expander_handle = &tca6408a_handle_,
+        };
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi_expander(SPI2_HOST, &io_config_1, &panel_io_1));
+
+
+        esp_lcd_panel_dev_config_t panel_config_1 = {};
+            panel_config_1.reset_gpio_num = DISPLAY_GC9D01_RESET_GPIO;
+            panel_config_1.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+            panel_config_1.bits_per_pixel = 16;
+            ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_1, &panel_config_1, &panel_1));
+        
+        esp_lcd_panel_reset(panel_1);
+        esp_lcd_panel_init(panel_1);
+        esp_lcd_panel_disp_on_off(panel_1, true);    
+
+        display_1 = new SpiLcdDisplay(panel_io_1, panel_1,
+                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, 
+                                    DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+                                    DISPLAY_MIRROR_X_1, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        
+        esp_lcd_panel_io_spi_expander_config_t io_config_2 = {
+            .pclk_hz = 40 * 1000 * 1000,
+            .spi_mode = 0,
+            .trans_queue_depth = 10,
+            .lcd_cmd_bits = 8,
+            .lcd_param_bits = 8,
+            .dc_gpio_num = DISPLAY_GC9D01_DC_GPIO,
+            .cs_expander_pin = DISPLAY_SPI_CS_2_GPIO,
+            .bl_pin = DISPLAY_GC9D01_BL_GPIO,
+            .bl_use_expander = true,
+            .expander_handle = &tca6408a_handle_,
+        };
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi_expander(SPI2_HOST, &io_config_2, &panel_io_2));
+
+
+        esp_lcd_panel_dev_config_t panel_config_2 = {};
+            panel_config_2.reset_gpio_num = GPIO_NUM_NC;//这里需要写空
+            panel_config_2.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+            panel_config_2.bits_per_pixel = 16;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_2, &panel_config_2, &panel_2));
+
+        esp_lcd_panel_reset(panel_2);
+        esp_lcd_panel_init(panel_2);
+        esp_lcd_panel_disp_on_off(panel_2, true);    
+        esp_lcd_panel_mirror(panel_2, DISPLAY_MIRROR_X_2, DISPLAY_MIRROR_Y);
+
+        display_2 = new SpiLcdDisplay(panel_io_2, panel_2, 
+                                    DISPLAY_WIDTH, DISPLAY_HEIGHT, 
+                                    DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+                                    DISPLAY_MIRROR_X_2, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        
+        if (display_1 != nullptr && display_2 != nullptr) {
+            dual_display_ = new DualDisplayEmotionOnly(display_1, display_2);
+        }
+        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO, 1);
+    }
 
 
      static void SensorMonitorTask(void *pvParameters)
@@ -426,6 +605,17 @@ private:
                                          pdMS_TO_TICKS(10));
             
             if (events & instance->MOTOR_TOGGLE_EVENT) {
+                instance->last_motor_trigger_time_ = std::chrono::steady_clock::now();
+                
+                if (!instance->user_interaction_detected_) {
+                    instance->user_interaction_detected_ = true;
+                    instance->greeting_sent_ = false;
+                    instance->vitality_displayed_ = false;
+                    ESP_LOGI(TAG, "MotorTask: User interaction detected, reset state variables");
+                } else {
+                    ESP_LOGI(TAG, "MotorTask: Motor pulse triggered by touch/radar, timer reset");
+                }
+                
                 instance->StartMotorPulse();
                 ESP_LOGI(TAG, "MotorTask: Motor pulse triggered by sensor event");
             }
@@ -453,6 +643,12 @@ private:
                 }
                 
                 if (should_notify) {
+                    instance->last_motor_trigger_time_ = std::chrono::steady_clock::now();
+                    instance->user_interaction_detected_ = true;
+                    instance->greeting_sent_ = false;
+                    instance->vitality_displayed_ = false;
+                    ESP_LOGI(TAG, "MotorTask: Radar detected person, reset state variables");
+                    
                     instance->StartMotorPulse();
                     ESP_LOGI(TAG, "MotorTask: Radar detected person, triggering AI and motor pulse");
                     auto& app = Application::GetInstance();
@@ -541,10 +737,90 @@ private:
                     
                     app.Schedule([wake_word]() {
                         auto& app = Application::GetInstance();
-                        ESP_LOGW(TAG, "Scheduled low battery wake word invoke: %s", wake_word.c_str());
+                        ESP_LOGI(TAG, "Scheduled low battery wake word invoke: %s", wake_word.c_str());
                         app.WakeWordInvoke(wake_word);
                     });
                 }
+            }
+            
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed_since_last_trigger = std::chrono::duration_cast<std::chrono::seconds>(
+                now - instance->last_motor_trigger_time_).count();
+            
+            if (instance->user_interaction_detected_ && !instance->greeting_sent_ && 
+                elapsed_since_last_trigger >= instance->GREETING_TIMEOUT_SEC) {
+                
+                instance->greeting_sent_ = true;
+                ESP_LOGI(TAG, "MotorTask: No interaction for %ld sec, sending greeting", 
+                        (long)elapsed_since_last_trigger);
+                
+                auto& app = Application::GetInstance();
+                DeviceState current_state = app.GetDeviceState();
+                ESP_LOGI(TAG, "Current device state for greeting: %d", static_cast<int>(current_state));
+                
+                std::string wake_word = "你好";
+                
+                if (current_state == DeviceState::kDeviceStateListening) {
+                    ESP_LOGI(TAG, "Device is listening, need to close session first");
+                    
+                    app.WakeWordInvoke(wake_word);
+                    ESP_LOGI(TAG, "First wake word sent to close listening session");
+                    
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    
+                    DeviceState new_state = app.GetDeviceState();
+                    ESP_LOGI(TAG, "After delay, device state: %d", static_cast<int>(new_state));
+                    
+                    if (new_state == DeviceState::kDeviceStateIdle) {
+                        app.WakeWordInvoke(wake_word);
+                        ESP_LOGI(TAG, "Second wake word sent for greeting");
+                    } else {
+                        ESP_LOGW(TAG, "State not idle after delay (%d), using Schedule", static_cast<int>(new_state));
+                        app.Schedule([wake_word]() {
+                            auto& app = Application::GetInstance();
+                            app.WakeWordInvoke(wake_word);
+                        });
+                    }
+                } else if (current_state == DeviceState::kDeviceStateIdle || 
+                           current_state == DeviceState::kDeviceStateSpeaking) {
+                    
+                    app.WakeWordInvoke(wake_word);
+                    ESP_LOGI(TAG, "Sent greeting wake word: %s, state was acceptable", wake_word.c_str());
+                } else {
+                    ESP_LOGW(TAG, "Device state %d not suitable for greeting, scheduling retry", 
+                            static_cast<int>(current_state));
+                    
+                    app.Schedule([wake_word]() {
+                        auto& app = Application::GetInstance();
+                        ESP_LOGI(TAG, "Scheduled greeting wake word invoke: %s", wake_word.c_str());
+                        app.WakeWordInvoke(wake_word);
+                    });
+                }
+            }
+            
+            if (instance->user_interaction_detected_ && instance->greeting_sent_ && 
+                !instance->vitality_displayed_ && 
+                elapsed_since_last_trigger >= instance->VITALITY_DISPLAY_INTERVAL_SEC) {
+                
+                instance->vitality_displayed_ = true;
+                instance->last_motor_trigger_time_ = std::chrono::steady_clock::now();
+                
+                ESP_LOGI(TAG, "MotorTask: Displaying vitality after %ld sec, timer reset but state unchanged", 
+                        (long)elapsed_since_last_trigger);
+                
+                instance->StartMotorPulse();
+            }
+            
+            if (instance->user_interaction_detected_ && instance->vitality_displayed_ && 
+                elapsed_since_last_trigger >= instance->VITALITY_DISPLAY_INTERVAL_SEC) {
+                
+                instance->vitality_displayed_ = false;
+                instance->last_motor_trigger_time_ = std::chrono::steady_clock::now();
+                
+                ESP_LOGI(TAG, "MotorTask: Periodic vitality display after %ld sec", 
+                        (long)elapsed_since_last_trigger);
+                
+                instance->StartMotorPulse();
             }
         }
     }
@@ -562,10 +838,14 @@ private:
         
         last_radar_left_time_ = std::chrono::steady_clock::now();
         last_touch_trigger_time_ = std::chrono::steady_clock::now();
+        last_motor_trigger_time_ = std::chrono::steady_clock::now();
         
         radar_first_detection_ = true;
+        user_interaction_detected_ = false;
+        greeting_sent_ = false;
+        vitality_displayed_ = false;
         
-        ESP_LOGI(TAG, "Initial states - Touch: %d, Radar: %d, Motor: OFF", 
+        ESP_LOGI(TAG, "Initial states - Touch: %d, Radar: %d, Motor: OFF, UserInteraction: false", 
                 last_touch_state_ ? 1 : 0, last_radar_state_ ? 1 : 0);
         
         esp_timer_create_args_t motor_timer_args = {};
@@ -629,6 +909,7 @@ private:
 
         ESP_LOGI(TAG, "Device powered on.");
 
+        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO, 0);
         StartSensorMonitoring();
 
         HandleAutoWake();
@@ -641,6 +922,7 @@ private:
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
+        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO,1);
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
 
         ESP_LOGI(TAG, "Device powered off.");
@@ -654,12 +936,18 @@ public:
         InitializePowerManager();
         InitializeLedController();
         InitializeAudioAmplifier();
+        InitializeDisplayManager();
         InitializeButtonCallbacks();
         InitializeTools();
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
     }
 
+    virtual Display *GetDisplay() override
+    {
+        return dual_display_;
+        //return display_2;
+    }
     virtual AudioCodec *GetAudioCodec() override
     {
         static Es8389AudioCodec audio_codec(
