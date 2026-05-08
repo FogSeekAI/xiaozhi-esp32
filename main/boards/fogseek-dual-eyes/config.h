@@ -31,8 +31,8 @@
 // #define AUDIO_I2S_GPIO_DOUT GPIO_NUM_13 // 数据输出（扬声器）
 // #define AUDIO_I2S_GPIO_DIN GPIO_NUM_17  // 数据输入（麦克风）
 
-#define AUDIO_CODEC_PA_PIN GPIO_NUM_41                    // NS4150B功放使能引脚
-#define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR // ES8389默认I2C地址
+// #define AUDIO_CODEC_PA_PIN GPIO_NUM_41                    // NS4150B功放使能引脚
+// #define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR // ES8389默认I2C地址
 
 // LCD 屏幕相关配置
 #define BOARD_LCD_TYPE DISPLAY_TYPE_JYC_0_71_INCH // LCD 屏幕类型
