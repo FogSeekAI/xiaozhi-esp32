@@ -15,6 +15,7 @@ class FragranceController
 public:
     enum class Mode
     {
+        NORMAL_MODE,
         WORK_MODE,
         SLEEP_AID_MODE,
         STRESS_RELIEF_MODE,
@@ -28,7 +29,7 @@ public:
     void SetIntensityHigh(); // 高浓度模式
     void SetIntensityLow();  // 低浓度模式
     void TurnOff();          // 关闭香氛
-
+    void SetNormalModeParams();
 private:
     Mode current_mode_ = Mode::OFF_MODE;
     bool is_running_ = false;
@@ -46,6 +47,7 @@ private:
     void SetWorkModeParams();
     void SetSleepAidModeParams();
     void SetStressReliefModeParams();
+    
 
     void StartCycleTimer();
     void StopCycleTimer();

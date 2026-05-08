@@ -21,14 +21,20 @@ void FragranceController::SetMode(Mode mode)
         // 根据模式设置参数
         switch (mode)
         {
+        case Mode::NORMAL_MODE:
+            SetNormalModeParams();
+            break;
         case Mode::WORK_MODE:
             SetWorkModeParams();
+            led_controller_.SetAllLightsLowBrightness();
             break;
         case Mode::SLEEP_AID_MODE:
             SetSleepAidModeParams();
+            led_controller_.StartBreathingEffect(1500);
             break;
         case Mode::STRESS_RELIEF_MODE:
             SetStressReliefModeParams();
+            led_controller_.StartBreathingEffect(4000);
             break;
         default:
             break;
@@ -41,9 +47,8 @@ void FragranceController::SetMode(Mode mode)
     else
     {
         is_running_ = false;
-        // 确保所有设备都停止
-        // led_controller_.StopBreathingEffect();
         motor_controller_.ControlMotor(false);
+        led_controller_.TurnOffRgbLights(1000);
     }
 }
 
@@ -128,33 +133,23 @@ void FragranceController::CycleTimerCallback()
 
     switch (current_mode_)
     {
+        case Mode::NORMAL_MODE:
+            motor_controller_.ControlMotor(true);
+            break;
         case Mode::WORK_MODE:
-            // 使用电机控制器的定时功能运行电机
             motor_controller_.RunMotorTimed(active_duration_);
-
-            // 更改颜色
-            //led_controller_.ChangeToRandomColors();
-
-            // 运行跑马灯效果，传入完整的周期时间
-            led_controller_.RunMarqueeLights(30000); // 30秒跑马灯
-
             break;
 
         case Mode::SLEEP_AID_MODE:
-            // 使用电机控制器的定时功能运行电机
             motor_controller_.RunMotorTimed(active_duration_);
-
-            // 关闭灯光
-            led_controller_.TurnOffRgbLights(1000);
-            
             break;
 
         case Mode::STRESS_RELIEF_MODE:
-            // 使用电机控制器的定时功能运行电机
             motor_controller_.RunMotorTimed(active_duration_);
+            break;
 
-            // 开始呼吸效果，传入完整的周期时间
-            led_controller_.StartBreathingEffect(3000); // 3秒呼吸周期
+        case Mode::OFF_MODE:
+            motor_controller_.ControlMotor(false);
             break;
 
     default:
@@ -166,8 +161,6 @@ void FragranceController::StopCurrentMode()
 {
     StopCycleTimer();
 
-    // 停止所有灯光效果
-    // led_controller_.StopBreathingEffect();
     led_controller_.TurnOffRgbLights(100);
 
     // 停止电机
@@ -199,4 +192,10 @@ void FragranceController::SetStressReliefModeParams()//解压模式
     //motor_controller_.RunMotorTimed(active_duration_);
     ESP_LOGI(FRAGRANCE_TAG, "Stress relief mode activated: motor runs for %d ms every %d ms cycle",
              active_duration_, cycle_duration_);
+}
+void FragranceController::SetNormalModeParams()
+{
+        
+        led_controller_.SetAllLightsLowBrightness();
+        ESP_LOGI(FRAGRANCE_TAG, "Motor and lights turned ON");
 }

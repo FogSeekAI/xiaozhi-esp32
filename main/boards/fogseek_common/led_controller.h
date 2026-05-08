@@ -147,6 +147,7 @@ public:
     void RunMarqueeLights(int duration_ms);
     void TurnOffRgbLights(int duration_ms);
     void StartBreathingEffect(int duration_ms);
+    void SetAllLightsLowBrightness();
 private:
     static const char *TAG; // 日志标签
 

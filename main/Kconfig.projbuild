@@ -214,6 +214,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO_MISTLIGHT
         bool "Zhumian MistLight Pro"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_NANO_MISTLIGHT_EXTEND
+        bool "Zhumian MistLight Extend"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_WOODLIGHT
         bool "Zhumian WoodLight"
         depends on IDF_TARGET_ESP32S3
