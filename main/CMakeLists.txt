@@ -1164,6 +1164,7 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        espressif__esp_cam_sensor
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME

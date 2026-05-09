@@ -52,6 +52,9 @@ public:
     virtual void SetChatMessage(const char* role, const char* content) override; 
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
 
+    esp_lcd_panel_handle_t GetPanelHandle() const { return panel_; }
+
+
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;
     // Set whether to hide chat messages/subtitles

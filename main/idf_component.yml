@@ -3,6 +3,7 @@ dependencies:
   waveshare/esp_lcd_sh8601: 1.0.2
   espressif/esp_lcd_co5300: ^2.0.3
   espressif/esp_lcd_ili9341: ==1.2.0
+  jbrilha/esp_lcd_ili9342: ^1.1.2
   espressif/esp_lcd_gc9a01: ==2.0.1
   espressif/esp_lcd_st77916: ^1.0.1
   espressif/esp_lcd_axs15231b: ^1.0.0
@@ -65,6 +66,10 @@ dependencies:
     - if: target in [esp32s3]
   espressif/adc_battery_estimation: ^0.2.1
   espressif/esp_new_jpeg: ^0.6.1
+  espressif/esp_cam_sensor:
+    version: "^1.0.0"
+    rules:
+    - if: target in [esp32s3]
 
   # SenseCAP Watcher Board
   wvirgil123/sscma_client:

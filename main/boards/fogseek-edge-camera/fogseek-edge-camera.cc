@@ -13,18 +13,45 @@
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
+#include "esp_video.h"
+#include "esp_lcd_panel_io_spi_expander.h"
+#include "display/lcd_display.h"
+#include "display/emote_display.h"
+#include "mcp_server.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
+#include <esp_heap_caps.h>
 #include <driver/gpio.h>
+#include <driver/spi_master.h>
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_ili9342.h"
+#include "display/lcd_display.h"
+#include "display/emote_display.h"
+#include "display/lvgl_display/lvgl_image.h"
+#include "mcp_server.h"
+#include <esp_lvgl_port.h>
+#include <lvgl.h>
+#include <freertos/task.h>
+#include <cstring>
+#include <sstream>
+#include <thread>
+#include <stdexcept>
 
-#define TAG "FogSeekEdge"
 
-class FogSeekEdge : public WifiBoard
+#define TAG "FogSeekEdgeCamera"
+
+
+
+class FogSeekEdgeCamera : public WifiBoard
 {
 private:
     Button boot_button_;
     tca6408a_handle_t tca6408a_handle_;
+    tca6408a_handle_t tca6408a_second_handle_;
+    spi_device_handle_t spi_lcd_ = nullptr;
 
     Tca6408aInterruptManager interrupt_manager_;
     Tca6408aButton ctrl_button_;
@@ -34,6 +61,35 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t button_monitor_timer_ = nullptr;
+    EspVideo* camera_ = nullptr;
+    Display* display_ = nullptr;
+    esp_lcd_panel_io_handle_t lcd_io_ = nullptr;
+    esp_lcd_panel_handle_t lcd_panel_ = nullptr;
+    esp_lcd_panel_handle_t panel_handle = NULL;
+
+    bool camera_initialized_ = false;
+
+
+
+    class Tca6408aBacklight : public Backlight {
+    private:
+        tca6408a_handle_t* tca_handle_;
+        tca6408a_gpio_t backlight_pin_;
+        
+    public:
+        Tca6408aBacklight(tca6408a_handle_t* handle, tca6408a_gpio_t pin) 
+            : tca_handle_(handle), backlight_pin_(pin) {
+        }
+        
+        void SetBrightnessImpl(uint8_t brightness) override {
+            if (tca_handle_) {
+                uint8_t level = (brightness > 0) ? 1 : 0;
+                ESP_LOGI(TAG, "Setting backlight: brightness=%d, level=%d", brightness, level);
+                
+                tca6408a_set_gpio_level(tca_handle_, backlight_pin_, level);
+            }
+        }
+    };
 
     void InitializeI2c()
     {
@@ -52,6 +108,18 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
     }
 
+
+    void InitializeSpi() {
+        spi_bus_config_t buscfg = {};
+        buscfg.mosi_io_num = SPI_PIN_NUM_LCD_MOSI;
+        buscfg.miso_io_num = GPIO_NUM_NC;
+        buscfg.sclk_io_num = SPI_PIN_NUM_LCD_SCLK;
+        buscfg.quadwp_io_num = GPIO_NUM_NC;
+        buscfg.quadhd_io_num = GPIO_NUM_NC;
+        buscfg.max_transfer_sz = DISPLAY_WIDTH * (DISPLAY_HEIGHT / 2) * sizeof(uint16_t);
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    }
+
     void InitializeTca6408a()
     {
         tca6408a_config_t tca6408a_config = {
@@ -63,11 +131,10 @@ private:
         esp_err_t ret = tca6408a_init(&tca6408a_handle_, &tca6408a_config);
         if (ret != ESP_OK)
         {
-            ESP_LOGE(TAG, "Failed to initialize Tca6408a");
+            ESP_LOGE(TAG, "Failed to initialize Tca6408a (0x20)");
             return;
         }
 
-        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_QSPI_PIN_NUM_LCD_BL, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, TCA6408A_DIR_OUTPUT);
@@ -76,7 +143,35 @@ private:
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGE_DONE_GPIO, TCA6408A_DIR_INPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGING_GPIO, TCA6408A_DIR_INPUT);
         
-        ESP_LOGI(TAG, "Tca6408a initialized successfully");
+        ESP_LOGI(TAG, "Tca6408a (0x20) initialized successfully");
+        
+        tca6408a_config_t tca6408a_second_config = {
+            .i2c_bus = i2c_bus_,
+            .i2c_address = TCA6408A_SECOND_ADDR,
+            .int_gpio = GPIO_NUM_NC,
+            .reset_gpio = GPIO_NUM_NC};
+
+        ret = tca6408a_init(&tca6408a_second_handle_, &tca6408a_second_config);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to initialize Tca6408a second chip (0x21)");
+            return;
+        }
+
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_CAM_PWDN_GPIO, TCA6408A_DIR_OUTPUT);
+        // 关键修复：立即设置 CS 为高电平（禁用状态），避免悬空
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, 1);
+        // 关闭背光
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, 0);
+        // 使能 VBAT
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, 1);
+        
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_CAM_PWDN_GPIO, 0);
+       
+        ESP_LOGI(TAG, "Tca6408a second chip (0x21) initialized successfully");
     }
 
     void InitializeInterruptManager()
@@ -116,7 +211,7 @@ private:
                              {
 
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                                 app.ToggleChatState();
                                  ESP_LOGI(TAG, "Clicked"); });
 
         ctrl_button_.OnDoubleClick([this]()
@@ -134,7 +229,6 @@ private:
                                       ESP_LOGI(TAG, "On Long Press");
                                       static bool state = false;
                                       state = !state;
-                                      // 切换电源状态
                                       if (state)
                                       {
                                           PowerOn();
@@ -146,18 +240,187 @@ private:
         ESP_LOGI(TAG, "Control button initialized on P%d", TCA6408A_CTRL_BUTTON_GPIO);
     }
 
-    // 处理自动唤醒逻辑
+    void InitializeCamera()
+    {
+        ESP_LOGI(TAG, "Initializing GC2145 camera using esp_video...");
+        
+        static esp_cam_ctlr_dvp_pin_config_t dvp_pin_config = {
+            .data_width = CAM_CTLR_DATA_WIDTH_8,
+            .data_io = {
+                [0] = CAMERA_PIN_D2,
+                [1] = CAMERA_PIN_D3,
+                [2] = CAMERA_PIN_D4,
+                [3] = CAMERA_PIN_D5,
+                [4] = CAMERA_PIN_D6,
+                [5] = CAMERA_PIN_D7,
+                [6] = CAMERA_PIN_D8,
+                [7] = CAMERA_PIN_D9,
+            },
+            .vsync_io = CAMERA_PIN_VSYNC,
+            .de_io = CAMERA_PIN_HREF,
+            .pclk_io = CAMERA_PIN_PCLK,
+            .xclk_io = CAMERA_PIN_XCLK,
+        };
+
+        esp_video_init_sccb_config_t sccb_config = {
+            .init_sccb = false,
+            .i2c_handle = i2c_bus_,
+            .freq = 100000,
+        };
+
+        esp_video_init_dvp_config_t dvp_config = {
+            .sccb_config = sccb_config,
+            .reset_pin = CAMERA_PIN_RESET,
+            .pwdn_pin = CAMERA_PIN_PWDN,
+            .dvp_pin = dvp_pin_config,
+            .xclk_freq = CAMERA_XCLK_FREQ_HZ,
+        };
+
+        esp_video_init_config_t video_config = {
+            .dvp = &dvp_config,
+        };
+
+        camera_ = new EspVideo(video_config);
+        
+        if (!camera_) {
+            ESP_LOGE(TAG, "Failed to create EspVideo instance");
+            return;
+        }
+        
+        camera_initialized_ = true;
+        ESP_LOGI(TAG, "GC2145 camera initialized successfully via esp_video");
+    }
+
+    void EnableLcdCs(bool enable)
+    {
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, enable ? 0 : 1);
+    }
+
+    
+    void InitializeLcdDisplay() {
+        esp_lcd_panel_io_handle_t panel_io = nullptr;
+        esp_lcd_panel_handle_t panel = nullptr;
+
+        ESP_LOGI(TAG, "Starting LCD initialization");
+        
+        // 确保背光关闭
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        
+        ESP_LOGD(TAG, "Install panel IO");
+        esp_lcd_panel_io_spi_config_t io_config = {};
+        io_config.cs_gpio_num = GPIO_NUM_NC;
+        io_config.dc_gpio_num = SPI_PIN_NUM_LCD_DC;
+        io_config.spi_mode = 0;
+        io_config.pclk_hz = 40 * 1000 * 1000;
+        io_config.trans_queue_depth = 10;
+        io_config.lcd_cmd_bits = 8;
+        io_config.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io));
+        ESP_LOGI(TAG, "Panel IO installed");
+
+        ESP_LOGD(TAG, "Install LCD driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = GPIO_NUM_NC;
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+        panel_config.bits_per_pixel = 16;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9342(panel_io, &panel_config, &panel));
+        ESP_LOGI(TAG, "LCD driver installed");
+        
+        // 拉低 CS 使能 LCD
+        ESP_LOGD(TAG, "Setting LCD CS low to enable communication");
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        esp_lcd_panel_reset(panel);
+        ESP_LOGI(TAG, "Panel reset");
+        
+        // 增加复位后的延迟
+        vTaskDelay(pdMS_TO_TICKS(120));
+
+        esp_lcd_panel_init(panel);
+        ESP_LOGI(TAG, "Panel initialized");
+
+        
+        
+        
+        esp_lcd_panel_invert_color(panel, false);
+        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
+        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        ESP_LOGI(TAG, "Panel configuration: swap_xy=%d, mirror_x=%d, mirror_y=%d", 
+                 DISPLAY_SWAP_XY, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        
+        esp_lcd_panel_disp_on_off(panel, true);
+        ESP_LOGI(TAG, "Display turned on");
+        vTaskDelay(pdMS_TO_TICKS(50));
+
+        lcd_panel_ = panel;
+        lcd_io_ = panel_io;
+
+        
+
+#if CONFIG_USE_EMOTE_MESSAGE_STYLE
+        display_ = new emote::EmoteDisplay(panel, panel_io, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        ESP_LOGI(TAG, "EmoteDisplay created");
+#else
+        display_ = new SpiLcdDisplay(panel_io, panel,
+            DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        ESP_LOGI(TAG, "SpiLcdDisplay created");
+#endif
+
+        if (display_) {
+            ESP_LOGI(TAG, "Display object created successfully");
+            ESP_LOGI(TAG, "Display size: %dx%d", display_->width(), display_->height());
+        } else {
+            ESP_LOGE(TAG, "Failed to create display object!");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // 打开背光
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, 1);
+        ESP_LOGI(TAG, "Backlight turned on");
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        ESP_LOGI(TAG, "ILI9342 LCD initialization completed");
+    }
+
+
+    
+    
+
+    
+
+    void InitializeTools() {
+        auto &mcp_server = McpServer::GetInstance();
+        
+        mcp_server.AddTool("self.system.reconfigure_wifi",
+            "End this conversation and enter WiFi configuration mode.\n"
+            "**CAUTION** You must ask the user to confirm this action.",
+            PropertyList(), [this](const PropertyList& properties) -> std::string {
+                EnterWifiConfigMode();
+                return "{\"status\": \"entering_wifi_config_mode\"}";
+            });
+
+        
+    }
+
+    
+    
+
+    
+
     void HandleAutoWake()
     {
         auto &app = Application::GetInstance();
         if (app.GetDeviceState() == DeviceState::kDeviceStateIdle)
         {
             auto &app = Application::GetInstance();
-            // USB充电状态下开机需要播放音效
             if (power_manager_.IsUsbPowered())
             {
                 app.PlaySound(Lang::Sounds::OGG_SUCCESS);
-                vTaskDelay(pdMS_TO_TICKS(500)); // 延时500ms播放音效
+                vTaskDelay(pdMS_TO_TICKS(500));
             }
             app.Schedule([]()
                          {
@@ -166,29 +429,27 @@ private:
         }
         else
         {
-            // 设备尚未进入空闲状态，500ms后再次检查，使用定时器异步检查，不阻塞当前任务
             esp_timer_handle_t check_timer;
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekEdge *>(arg);
+                auto instance = static_cast<FogSeekEdgeCamera *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
             timer_args.name = "check_idle_timer";
             esp_timer_create(&timer_args, &check_timer);
-            esp_timer_start_once(check_timer, 500000); // 500ms = 500000微秒
+            esp_timer_start_once(check_timer, 500000);
         }
         ESP_LOGI(TAG, "Handle Auto Wake.");
     }
 
-    // 开机流程
     void PowerOn()
     {
         power_manager_.PowerOn();
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, 1);
 
-        // 更新 LED 状态（由 LED 控制器管理）
         led_controller_.UpdateLedStatus(power_manager_);
 
         ESP_LOGI(TAG, "Device powered on.");
@@ -200,8 +461,8 @@ private:
     {
         power_manager_.PowerOff();
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 0);
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, 0);
 
-        // 更新 LED 状态（由 LED 控制器管理，会自动熄灭）
         led_controller_.UpdateLedStatus(power_manager_);
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
@@ -209,14 +470,22 @@ private:
     }
 
 public:
-    FogSeekEdge() : boot_button_(BOOT_BUTTON_GPIO)
+    FogSeekEdgeCamera() : boot_button_(BOOT_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializeTca6408a();
+        InitializeSpi();
+        InitializeLcdDisplay();
         InitializeInterruptManager();
         InitializePowerManager();
         InitializeLedController();
         InitializeCtrlButton();
+        InitializeCamera();
+        InitializeTools();
+
+        if (display_) {
+            GetBacklight()->RestoreBrightness();
+        }
     }
 
     virtual AudioCodec *GetAudioCodec() override
@@ -242,7 +511,21 @@ public:
         return led_controller_.GetGreenLed();
     }
 
-    ~FogSeekEdge()
+    virtual Camera* GetCamera() override
+    {
+        return camera_;
+    }
+
+    virtual Display* GetDisplay() override {
+        return display_;
+    }
+    
+    virtual Backlight* GetBacklight() override {
+        static Tca6408aBacklight backlight(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL);
+        return &backlight;
+    }
+
+    ~FogSeekEdgeCamera()
     {
         if (button_monitor_timer_)
         {
@@ -251,6 +534,16 @@ public:
             button_monitor_timer_ = nullptr;
         }
 
+        if (lcd_panel_) {
+            esp_lcd_panel_del(lcd_panel_);
+        }
+        if (lcd_io_) {
+            esp_lcd_panel_io_del(lcd_io_);
+        }
+        spi_bus_free(SPI2_HOST);
+
+        camera_ = nullptr;
+
         if (i2c_bus_)
         {
             i2c_del_master_bus(i2c_bus_);
@@ -258,4 +551,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekEdge);
+DECLARE_BOARD(FogSeekEdgeCamera);

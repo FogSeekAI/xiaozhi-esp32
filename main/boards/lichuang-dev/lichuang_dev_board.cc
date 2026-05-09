@@ -10,7 +10,7 @@
 #include "system_info.h"
 #include "esp_jpeg_enc.h" // 引入新的 JPEG 编码头文件
 #include "esp_jpeg_common.h"
-
+#include "esp32_camera.h"
 
 
 
@@ -88,7 +88,7 @@ private:
     bool camera_initialized_ = false;
     uint8_t* captured_image_ = nullptr;
     size_t captured_image_size_ = 0;
-
+    Camera* camera_ = nullptr;
 
 
     void InitializeI2c() {
@@ -186,6 +186,18 @@ private:
 
         lcd_panel_ = panel;
 
+        uint16_t *buffer = (uint16_t *)heap_caps_malloc(DISPLAY_WIDTH * 2, MALLOC_CAP_DMA);
+        if (buffer) {
+            for (int i = 0; i < DISPLAY_WIDTH; i++) {
+                buffer[i] = 0xF800;  // 红色
+            }
+            
+            for (int y = 0; y < DISPLAY_HEIGHT; y++) {
+                esp_lcd_panel_draw_bitmap(lcd_panel_, 0, y, DISPLAY_WIDTH, y + 1, buffer);
+            }
+            heap_caps_free(buffer);
+        }
+
 #if CONFIG_USE_EMOTE_MESSAGE_STYLE
         display_ = new emote::EmoteDisplay(panel, panel_io, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 #else
@@ -275,6 +287,108 @@ private:
         config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
 
         camera_ = new Esp32Camera(config);
+        
+        // 标记摄像头已初始化
+        camera_initialized_ = true;
+        ESP_LOGI(TAG, "Camera initialized successfully");
+    }
+
+    std::string ConvertRGB565ToJpeg(camera_fb_t* fb) {
+        struct JpegBuffer {
+            uint8_t* data = nullptr;
+            size_t size = 0;
+        };
+        
+        JpegBuffer jpeg_buf;
+        
+        bool ok = fmt2jpg_cb(fb->buf, fb->len, fb->width, fb->height, 
+                            PIXFORMAT_RGB565, 80,
+                            [](void* arg, size_t index, const void* data, size_t len) -> size_t {
+                                auto* buffer = static_cast<JpegBuffer*>(arg);
+                                if (index == 0 && data != nullptr && len > 0) {
+                                    buffer->data = (uint8_t*)malloc(len);
+                                    if (buffer->data) {
+                                        memcpy(buffer->data, data, len);
+                                        buffer->size = len;
+                                    }
+                                } else if (index > 0 && data != nullptr && len > 0 && buffer->data) {
+                                    uint8_t* new_data = (uint8_t*)realloc(buffer->data, buffer->size + len);
+                                    if (new_data) {
+                                        buffer->data = new_data;
+                                        memcpy(buffer->data + buffer->size, data, len);
+                                        buffer->size += len;
+                                    }
+                                }
+                                return len;
+                            },
+                            &jpeg_buf);
+        
+        if (!ok || !jpeg_buf.data || jpeg_buf.size == 0) {
+            if (jpeg_buf.data) {
+                free(jpeg_buf.data);
+            }
+            throw std::runtime_error("Failed to convert RGB565 to JPEG");
+        }
+        
+        std::string result((char*)jpeg_buf.data, jpeg_buf.size);
+        free(jpeg_buf.data);
+        return result;
+    }
+
+    void CaptureAndDisplayPhoto(int timeout_ms) {
+        if (!camera_initialized_ || !camera_) {
+            throw std::runtime_error("Camera not initialized");
+        }
+
+        ClearCapturedPhoto();
+
+        bool success = camera_->Capture();
+        if (!success) {
+            throw std::runtime_error("Failed to capture photo");
+        }
+
+        camera_fb_t* fb = esp_camera_fb_get();
+        if (!fb) {
+            throw std::runtime_error("Failed to get camera frame buffer");
+        }
+
+        try {
+            if (fb->format == PIXFORMAT_RGB565) {
+                std::string jpeg_data = ConvertRGB565ToJpeg(fb);
+                
+                captured_image_size_ = jpeg_data.size();
+                captured_image_ = (uint8_t*)malloc(captured_image_size_);
+                if (!captured_image_) {
+                    throw std::runtime_error("Failed to allocate memory for captured image");
+                }
+                memcpy(captured_image_, jpeg_data.data(), captured_image_size_);
+            } else if (fb->format == PIXFORMAT_JPEG) {
+                captured_image_size_ = fb->len;
+                captured_image_ = (uint8_t*)malloc(captured_image_size_);
+                if (!captured_image_) {
+                    throw std::runtime_error("Failed to allocate memory for captured image");
+                }
+                memcpy(captured_image_, fb->buf, captured_image_size_);
+            } else {
+                throw std::runtime_error("Unsupported pixel format");
+            }
+
+            esp_camera_fb_return(fb);
+
+            ESP_LOGI(TAG, "Photo captured and stored, size: %zu bytes", captured_image_size_);
+
+        } catch (...) {
+            esp_camera_fb_return(fb);
+            throw;
+        }
+    }
+
+    void ClearCapturedPhoto() {
+        if (captured_image_) {
+            free(captured_image_);
+            captured_image_ = nullptr;
+            captured_image_size_ = 0;
+        }
     }
 
     void InitializeTools() {
@@ -295,7 +409,7 @@ private:
             "Do not use this for general conversation.",
             PropertyList({
                 Property("question", kPropertyTypeString, 
-                    "请用中文简单描述这张图片中的内容，主要包括物体、颜色、场景和任何可见的文字。")
+                    std::string("请用中文简单描述这张图片中的内容，主要包括物体、颜色、场景和任何可见的文字。"))
             }), 
             [this](const PropertyList& properties) -> std::string {
                 std::string question;
@@ -429,7 +543,7 @@ public:
     }
 
     virtual Camera* GetCamera() override {
-        return nullptr;
+        return camera_;
     }
 };
 
