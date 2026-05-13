@@ -8,18 +8,13 @@
 #include <freertos/queue.h>
 #include <driver/i2c_master.h>
 #include <esp_err.h>
+#include "esp_camera.h"
 
 #define GC2145_CHIP_ID   0x21
-
-struct JpegChunk {
-    uint8_t* data;
-    size_t len;
-};
+#define GC2145_SCCB_ADDR 0x3C
 
 class Gc2145Camera : public Camera {
 private:
-    static constexpr uint8_t GC2145_SCCB_ADDR = 0x3C;
-    
     i2c_master_bus_handle_t i2c_bus_;
     i2c_master_dev_handle_t i2c_dev_;
     bool initialized_ = false;
@@ -33,10 +28,6 @@ private:
     std::string explain_url_;
     std::string explain_token_;
     std::thread encoder_thread_;
-    
-    esp_err_t WriteReg(uint8_t reg, uint8_t value);
-    esp_err_t ReadReg(uint8_t reg, uint8_t* value);
-    esp_err_t InitEspCamera();
     
 public:
     Gc2145Camera(i2c_master_bus_handle_t i2c_bus);

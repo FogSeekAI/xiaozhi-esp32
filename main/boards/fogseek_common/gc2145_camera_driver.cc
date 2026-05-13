@@ -6,17 +6,17 @@
 #include <esp_heap_caps.h>
 #include <cstring>
 #include <stdexcept>
-#include <thread>
 #include "display/lcd_display.h"
 #include "display/lvgl_display/lvgl_image.h"
 #include "boards/common/board.h"
 #include <esp_camera.h>
 #include <driver/ledc.h>
 #include <driver/gpio.h>
-#include "jpg/image_to_jpeg.h"
-#include "board.h"
 #include "system_info.h"
-#include "network_interface.h"
+#include "display/lvgl_display/jpg/image_to_jpeg.h"
+#include <linux/videodev2.h>
+
+
 
 
 #define TAG "Gc2145Camera"
@@ -26,14 +26,17 @@
 #define CAMERA_PIN_PCLK     GPIO_NUM_45
 #define CAMERA_PIN_VSYNC    GPIO_NUM_6
 #define CAMERA_PIN_HREF     GPIO_NUM_7
-#define CAMERA_PIN_D2       GPIO_NUM_41
-#define CAMERA_PIN_D3       GPIO_NUM_38
-#define CAMERA_PIN_D4       GPIO_NUM_4
-#define CAMERA_PIN_D5       GPIO_NUM_40
-#define CAMERA_PIN_D6       GPIO_NUM_42
-#define CAMERA_PIN_D7       GPIO_NUM_16
-#define CAMERA_PIN_D8       GPIO_NUM_12
-#define CAMERA_PIN_D9       GPIO_NUM_15
+#define CAMERA_PIN_D0       GPIO_NUM_41
+#define CAMERA_PIN_D1       GPIO_NUM_38
+#define CAMERA_PIN_D2       GPIO_NUM_4
+#define CAMERA_PIN_D3       GPIO_NUM_40
+#define CAMERA_PIN_D4       GPIO_NUM_42
+#define CAMERA_PIN_D5       GPIO_NUM_16
+#define CAMERA_PIN_D6       GPIO_NUM_12
+#define CAMERA_PIN_D7       GPIO_NUM_15
+#define CAMERA_PIN_SDA      -1
+#define CAMERA_PIN_SCL      -1
+#define CAMERA_I2C_PORT     0
 
 static void InitCameraXclk() {
     ledc_timer_config_t timer_cfg = {
@@ -101,135 +104,94 @@ Gc2145Camera::~Gc2145Camera() {
     }
 }
 
-esp_err_t Gc2145Camera::WriteReg(uint8_t reg, uint8_t value) {
-    if (!i2c_dev_) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    uint8_t buffer[2] = {reg, value};
-    esp_err_t ret = i2c_master_transmit(i2c_dev_, buffer, 2, pdMS_TO_TICKS(200));
-    
-    if (ret != ESP_OK) {
-        ESP_LOGD(TAG, "WriteReg failed: reg=0x%02X, err=%d", reg, ret);
-    }
-    
-    return ret;
-}
 
-esp_err_t Gc2145Camera::ReadReg(uint8_t reg, uint8_t* value) {
-    if (!i2c_dev_) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    esp_err_t ret;
-    
-    ret = i2c_master_transmit(i2c_dev_, &reg, 1, pdMS_TO_TICKS(200));
-    if (ret != ESP_OK) {
-        ESP_LOGD(TAG, "ReadReg transmit failed: reg=0x%02X, err=%d", reg, ret);
-        return ret;
-    }
-    
-    ret = i2c_master_receive(i2c_dev_, value, 1, pdMS_TO_TICKS(200));
-    if (ret != ESP_OK) {
-        ESP_LOGD(TAG, "ReadReg receive failed: reg=0x%02X, err=%d", reg, ret);
-    }
-    
-    return ret;
-}
 
 esp_err_t Gc2145Camera::InitSensor() {
-    ESP_LOGI(TAG, "Initializing GC2145 sensor via I2C...");
+    ESP_LOGI(TAG, "Initializing GC2145 camera using esp_camera_init...");
     
-    ESP_LOGI(TAG, "Step 1: Waking up sensor (Write 0xFE=0x80)...");
-    esp_err_t ret = WriteReg(0xFE, 0x80);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to wake up sensor");
-        return ret;
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    camera_config_t config;
+    memset(&config, 0, sizeof(config));
     
-    ESP_LOGI(TAG, "Step 2: Selecting Page 0 (Write 0xFE=0x00)...");
-    ret = WriteReg(0xFE, 0x00);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to select page 0");
-        return ret;
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    config.pin_pwdn = GPIO_NUM_NC;
+    config.pin_reset = GPIO_NUM_NC;
+    config.pin_xclk = CAMERA_PIN_XCLK;
+    config.pin_sccb_sda = CAMERA_PIN_SDA;
+    config.pin_sccb_scl = CAMERA_PIN_SCL;
+    config.sccb_i2c_port = CAMERA_I2C_PORT;
     
-    ESP_LOGI(TAG, "Step 3: Reading Chip ID from 0xF0...");
-    uint8_t chip_id = 0;
-    ret = ReadReg(0xF0, &chip_id);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read chip ID, error: %d", ret);
-        return ret;
-    }
+    config.pin_d0 = CAMERA_PIN_D0;
+    config.pin_d1 = CAMERA_PIN_D1;
+    config.pin_d2 = CAMERA_PIN_D2;
+    config.pin_d3 = CAMERA_PIN_D3;
+    config.pin_d4 = CAMERA_PIN_D4;
+    config.pin_d5 = CAMERA_PIN_D5;
+    config.pin_d6 = CAMERA_PIN_D6;
+    config.pin_d7 = CAMERA_PIN_D7;
     
-    ESP_LOGI(TAG, "Chip ID read: 0x%02X (Expected: 0x%02X)", chip_id, GC2145_CHIP_ID);
+    config.pin_vsync = CAMERA_PIN_VSYNC;
+    config.pin_href = CAMERA_PIN_HREF;
+    config.pin_pclk = CAMERA_PIN_PCLK;
     
-    if (chip_id != GC2145_CHIP_ID) {
-        ESP_LOGE(TAG, "Chip ID mismatch!");
-        return ESP_ERR_INVALID_VERSION;
-    }
+    config.xclk_freq_hz = CAMERA_XCLK_FREQ_HZ;
+    config.ledc_timer = LEDC_TIMER_0;
+    config.ledc_channel = LEDC_CHANNEL_0;
     
-    ESP_LOGI(TAG, "GC2145 chip ID verified successfully");
+    config.pixel_format = PIXFORMAT_RGB565;
+    config.frame_size = FRAMESIZE_QVGA;
+    config.jpeg_quality = 12;
+    config.fb_count = 2;
+    config.fb_location = CAMERA_FB_IN_PSRAM;
+    config.grab_mode = CAMERA_GRAB_LATEST;
     
-    ESP_LOGI(TAG, "Step 4: Waiting for sensor stabilization (500ms)...");
-    vTaskDelay(pdMS_TO_TICKS(500));
-    
-    ESP_LOGI(TAG, "Step 5: Writing initialization registers...");
-    size_t reg_count = sizeof(gc2145_init_reg_tbl) / sizeof(gc2145_init_reg_tbl[0]);
-    for (size_t i = 0; i < reg_count; i++) {
-        uint8_t addr = gc2145_init_reg_tbl[i][0];
-        uint8_t val = gc2145_init_reg_tbl[i][1];
-        
-        if (addr == 0x00 && val == 0x00 && i > 10) {
-            break;
-        }
-        
-        ret = WriteReg(addr, val);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to write register 0x%02X at index %d", addr, (int)i);
-            return ret;
-        }
+    ESP_LOGI(TAG, "Calling esp_camera_init...");
+    esp_err_t err = esp_camera_init(&config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Camera init failed with error 0x%x", err);
+        return err;
     }
     
-    ESP_LOGI(TAG, "Step 6: Setting pixel format to RGB565 and output order...");
-    ret = WriteReg(0x84, 0xa6);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set pixel format");
-        return ret;
-    }
-    
-    ESP_LOGI(TAG, "Step 7: Configuring output data order for LCD compatibility...");
-    WriteReg(0xfe, 0x00);
-    WriteReg(0x17, 0x15);
-    
+    esp_camera_initialized_ = true;
     initialized_ = true;
-    ESP_LOGI(TAG, "GC2145 sensor initialized successfully");
+    
+    frame_width_ = 320;
+    frame_height_ = 240;
+    frame_buffer_size_ = frame_width_ * frame_height_ * 2;
+    
+    ESP_LOGI(TAG, "GC2145 camera initialized successfully via esp_camera_init");
     return ESP_OK;
 }
 
 esp_err_t Gc2145Camera::ConfigureResolution(uint16_t width, uint16_t height) {
     ESP_LOGI(TAG, "Configuring resolution: %dx%d", width, height);
     
-    uint8_t start_x = (1600 - width) / 2;
-    uint8_t start_y = (1200 - height) / 2;
+    framesize_t framesize = FRAMESIZE_QVGA;
     
-    WriteReg(0xfe, 0x00);
-    WriteReg(0x17, start_x >> 2);
-    WriteReg(0x18, start_x & 0x03);
-    WriteReg(0x19, start_y >> 2);
-    WriteReg(0x1A, start_y & 0x03);
-    WriteReg(0x1B, (width + 7) >> 3);
-    WriteReg(0x1C, width & 0x07);
-    WriteReg(0x1D, (height + 1) >> 1);
-    WriteReg(0x1E, height & 0x01);
+    if (width == 320 && height == 240) {
+        framesize = FRAMESIZE_QVGA;
+    } else if (width == 640 && height == 480) {
+        framesize = FRAMESIZE_VGA;
+    } else if (width == 160 && height == 120) {
+        framesize = FRAMESIZE_QQVGA;
+    } else {
+        ESP_LOGW(TAG, "Unsupported resolution %dx%d, using QVGA", width, height);
+        framesize = FRAMESIZE_QVGA;
+    }
     
-    WriteReg(0x84, 0xa6);
+    sensor_t* sensor = esp_camera_sensor_get();
+    if (!sensor) {
+        ESP_LOGE(TAG, "Failed to get camera sensor");
+        return ESP_ERR_INVALID_STATE;
+    }
     
-    frame_width_ = width;
-    frame_height_ = height;
-    frame_buffer_size_ = width * height * 2;
+    esp_err_t ret = sensor->set_framesize(sensor, framesize);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set framesize: %d", ret);
+        return ret;
+    }
+    
+    frame_width_ = resolution[framesize].width;
+    frame_height_ = resolution[framesize].height;
+    frame_buffer_size_ = frame_width_ * frame_height_ * 2;
     
     if (frame_buffer_) {
         heap_caps_free(frame_buffer_);
@@ -240,61 +202,150 @@ esp_err_t Gc2145Camera::ConfigureResolution(uint16_t width, uint16_t height) {
         return ESP_ERR_NO_MEM;
     }
     
-    ESP_LOGI(TAG, "Frame buffer allocated: %zu bytes", frame_buffer_size_);
+    ESP_LOGI(TAG, "Resolution configured: %dx%d, buffer size: %zu", 
+             frame_width_, frame_height_, frame_buffer_size_);
     return ESP_OK;
 }
 
-esp_err_t Gc2145Camera::InitEspCamera() {
-    if (esp_camera_initialized_) {
-        return ESP_OK;
-    }
-    
-    ESP_LOGI(TAG, "Initializing ESP-Camera for DVP/CSI interface...");
-    
-    camera_config_t config;
-    memset(&config, 0, sizeof(config));
-    
-    config.ledc_channel = LEDC_CHANNEL_0;
-    config.ledc_timer = LEDC_TIMER_0;
-    config.pin_d0 = CAMERA_PIN_D2;
-    config.pin_d1 = CAMERA_PIN_D3;
-    config.pin_d2 = CAMERA_PIN_D4;
-    config.pin_d3 = CAMERA_PIN_D5;
-    config.pin_d4 = CAMERA_PIN_D6;
-    config.pin_d5 = CAMERA_PIN_D7;
-    config.pin_d6 = CAMERA_PIN_D8;
-    config.pin_d7 = CAMERA_PIN_D9;
-    config.pin_xclk = CAMERA_PIN_XCLK;
-    config.pin_pclk = CAMERA_PIN_PCLK;
-    config.pin_vsync = CAMERA_PIN_VSYNC;
-    config.pin_href = CAMERA_PIN_HREF;
-    config.pin_sccb_sda = -1;
-    config.pin_sccb_scl = -1;
-    config.sccb_i2c_port = 0;
-    config.pin_pwdn = GPIO_NUM_NC;
-    config.pin_reset = GPIO_NUM_NC;
-    config.xclk_freq_hz = CAMERA_XCLK_FREQ_HZ;
-    config.pixel_format = PIXFORMAT_RGB565;
-    config.frame_size = FRAMESIZE_QVGA;
-    config.jpeg_quality = 12;
-    config.fb_count = 2;
-    config.fb_location = CAMERA_FB_IN_PSRAM;
-    config.grab_mode = CAMERA_GRAB_LATEST;
-    
-    esp_err_t err = esp_camera_init(&config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Camera init failed with error 0x%x", err);
-        return err;
-    }
-    
-    esp_camera_initialized_ = true;
-    ESP_LOGI(TAG, "ESP-Camera initialized successfully");
-    return ESP_OK;
-}
+
 
 void Gc2145Camera::SetExplainUrl(const std::string& url, const std::string& token) {
     explain_url_ = url;
     explain_token_ = token;
+}
+
+
+
+bool Gc2145Camera::Capture() {
+    if (!initialized_) {
+        ESP_LOGE(TAG, "Camera not initialized");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Capturing frame from GC2145...");
+    
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (!fb) {
+        ESP_LOGE(TAG, "Failed to get camera frame buffer");
+        return false;
+    }
+    
+    ESP_LOGI(TAG, "Frame captured: %dx%d, format=%d, size=%zu", 
+             fb->width, fb->height, fb->format, fb->len);
+    
+    if (frame_buffer_) {
+        heap_caps_free(frame_buffer_);
+        frame_buffer_ = nullptr;
+    }
+    
+    frame_buffer_size_ = fb->len;
+    frame_width_ = fb->width;
+    frame_height_ = fb->height;
+    
+    frame_buffer_ = (uint8_t*)heap_caps_malloc(frame_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!frame_buffer_) {
+        ESP_LOGE(TAG, "Failed to allocate frame buffer");
+        esp_camera_fb_return(fb);
+        return false;
+    }
+    
+    if (fb->format == PIXFORMAT_RGB565) {
+        uint16_t* src = (uint16_t*)fb->buf;
+        uint16_t* dst = (uint16_t*)frame_buffer_;
+        size_t pixel_count = fb->width * fb->height;
+        
+        for (size_t i = 0; i < pixel_count; i++) {
+            dst[i] = __builtin_bswap16(src[i]);
+        }
+    } else {
+        memcpy(frame_buffer_, fb->buf, frame_buffer_size_);
+    }
+    
+    auto& board = Board::GetInstance();
+    auto display = board.GetDisplay();
+    auto lcd_display = dynamic_cast<LcdDisplay*>(display);
+    
+    if (lcd_display && fb->format == PIXFORMAT_RGB565) {
+        size_t image_size = fb->len;
+        
+        int stride = fb->width * 2;
+        try {
+            uint8_t* image_data = (uint8_t*)heap_caps_malloc(image_size, MALLOC_CAP_SPIRAM);
+            if (image_data) {
+                if (fb->format == PIXFORMAT_RGB565) {
+                    uint16_t* src = (uint16_t*)fb->buf;
+                    uint16_t* dst = (uint16_t*)image_data;
+                    size_t pixel_count = fb->width * fb->height;
+                    
+                    for (size_t i = 0; i < pixel_count; i++) {
+                        dst[i] = __builtin_bswap16(src[i]);
+                    }
+                } else {
+                    memcpy(image_data, fb->buf, image_size);
+                }
+                
+                auto lvgl_image = std::make_unique<LvglAllocatedImage>(
+                    image_data, image_size, 
+                    fb->width, fb->height, 
+                    stride, LV_COLOR_FORMAT_RGB565
+                );
+                lcd_display->SetPreviewImage(std::move(lvgl_image));
+                ESP_LOGI(TAG, "Preview displayed on LCD");
+                
+                esp_timer_handle_t clear_timer;
+                esp_timer_create_args_t timer_args = {};
+                timer_args.callback = [](void* arg) {
+                    auto lcd_disp = static_cast<LcdDisplay*>(arg);
+                    if (lcd_disp) {
+                        lcd_disp->SetPreviewImage(nullptr);
+                        ESP_LOGI(TAG, "Preview cleared");
+                    }
+                };
+                timer_args.arg = lcd_display;
+                timer_args.name = "clear_preview_timer";
+                esp_timer_create(&timer_args, &clear_timer);
+                esp_timer_start_once(clear_timer, 3000000);
+            } else {
+                ESP_LOGE(TAG, "Failed to allocate memory for image data");
+            }
+        } catch (const std::exception& e) {
+            ESP_LOGE(TAG, "Failed to display image: %s", e.what());
+        }
+    }
+    
+    esp_camera_fb_return(fb);
+    
+    return true;
+}
+
+bool Gc2145Camera::SetHMirror(bool enabled) {
+    if (!initialized_) {
+        return false;
+    }
+    
+    sensor_t* sensor = esp_camera_sensor_get();
+    if (!sensor) {
+        ESP_LOGE(TAG, "Failed to get camera sensor");
+        return false;
+    }
+    
+    int ret = sensor->set_hmirror(sensor, enabled ? 1 : 0);
+    return (ret == 0);
+}
+
+bool Gc2145Camera::SetVFlip(bool enabled) {
+    if (!initialized_) {
+        return false;
+    }
+    
+    sensor_t* sensor = esp_camera_sensor_get();
+    if (!sensor) {
+        ESP_LOGE(TAG, "Failed to get camera sensor");
+        return false;
+    }
+    
+    int ret = sensor->set_vflip(sensor, enabled ? 1 : 0);
+    return (ret == 0);
 }
 
 std::string Gc2145Camera::Explain(const std::string& question) {
@@ -305,6 +356,11 @@ std::string Gc2145Camera::Explain(const std::string& question) {
     if (!frame_buffer_ || frame_buffer_size_ == 0) {
         throw std::runtime_error("No captured frame available for explanation");
     }
+
+    struct JpegChunk {
+        uint8_t* data;
+        size_t len;
+    };
 
     QueueHandle_t jpeg_queue = xQueueCreate(40, sizeof(JpegChunk));
     if (jpeg_queue == nullptr) {
@@ -431,159 +487,4 @@ std::string Gc2145Camera::Explain(const std::string& question) {
     ESP_LOGI(TAG, "Explain image size=%d bytes, compressed size=%d, remain stack size=%d, question=%s\n%s",
              (int)frame_buffer_size_, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
     return result;
-}
-
-bool Gc2145Camera::Capture() {
-    if (!initialized_) {
-        ESP_LOGE(TAG, "Camera not initialized");
-        return false;
-    }
-    
-    if (!esp_camera_initialized_) {
-        ESP_LOGI(TAG, "Initializing ESP-Camera for frame capture...");
-        esp_err_t ret = InitEspCamera();
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize ESP-Camera: %d", ret);
-            return false;
-        }
-    }
-    
-    ESP_LOGI(TAG, "Capturing frame from GC2145...");
-    
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb) {
-        ESP_LOGE(TAG, "Failed to get camera frame buffer");
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "Frame captured: %dx%d, format=%d, size=%zu", 
-             fb->width, fb->height, fb->format, fb->len);
-    
-    if (frame_buffer_) {
-        heap_caps_free(frame_buffer_);
-        frame_buffer_ = nullptr;
-    }
-    
-    frame_buffer_size_ = fb->len;
-    frame_width_ = fb->width;
-    frame_height_ = fb->height;
-    
-    frame_buffer_ = (uint8_t*)heap_caps_malloc(frame_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!frame_buffer_) {
-        ESP_LOGE(TAG, "Failed to allocate frame buffer");
-        esp_camera_fb_return(fb);
-        return false;
-    }
-    
-    if (fb->format == PIXFORMAT_RGB565) {
-        uint16_t* src = (uint16_t*)fb->buf;
-        uint16_t* dst = (uint16_t*)frame_buffer_;
-        size_t pixel_count = fb->width * fb->height;
-        
-        for (size_t i = 0; i < pixel_count; i++) {
-            dst[i] = __builtin_bswap16(src[i]);
-        }
-    } else {
-        memcpy(frame_buffer_, fb->buf, frame_buffer_size_);
-    }
-    
-    auto& board = Board::GetInstance();
-    auto display = board.GetDisplay();
-    auto lcd_display = dynamic_cast<LcdDisplay*>(display);
-    
-    if (lcd_display && fb->format == PIXFORMAT_RGB565) {
-        size_t image_size = fb->len;
-        
-        int stride = fb->width * 2;
-        try {
-            uint8_t* image_data = (uint8_t*)heap_caps_malloc(image_size, MALLOC_CAP_SPIRAM);
-            if (image_data) {
-                if (fb->format == PIXFORMAT_RGB565) {
-                    uint16_t* src = (uint16_t*)fb->buf;
-                    uint16_t* dst = (uint16_t*)image_data;
-                    size_t pixel_count = fb->width * fb->height;
-                    
-                    for (size_t i = 0; i < pixel_count; i++) {
-                        dst[i] = __builtin_bswap16(src[i]);
-                    }
-                } else {
-                    memcpy(image_data, fb->buf, image_size);
-                }
-                
-                auto lvgl_image = std::make_unique<LvglAllocatedImage>(
-                    image_data, image_size, 
-                    fb->width, fb->height, 
-                    stride, LV_COLOR_FORMAT_RGB565
-                );
-                lcd_display->SetPreviewImage(std::move(lvgl_image));
-                ESP_LOGI(TAG, "Preview displayed on LCD");
-                
-                esp_timer_handle_t clear_timer;
-                esp_timer_create_args_t timer_args = {};
-                timer_args.callback = [](void* arg) {
-                    auto lcd_disp = static_cast<LcdDisplay*>(arg);
-                    if (lcd_disp) {
-                        lcd_disp->SetPreviewImage(nullptr);
-                        ESP_LOGI(TAG, "Preview cleared");
-                    }
-                };
-                timer_args.arg = lcd_display;
-                timer_args.name = "clear_preview_timer";
-                esp_timer_create(&timer_args, &clear_timer);
-                esp_timer_start_once(clear_timer, 3000000);
-            } else {
-                ESP_LOGE(TAG, "Failed to allocate memory for image data");
-            }
-        } catch (const std::exception& e) {
-            ESP_LOGE(TAG, "Failed to display image: %s", e.what());
-        }
-    }
-    
-    esp_camera_fb_return(fb);
-    
-    return true;
-}
-
-bool Gc2145Camera::SetHMirror(bool enabled) {
-    if (!initialized_) {
-        return false;
-    }
-    
-    uint8_t reg_val = 0;
-    ReadReg(0x17, &reg_val);
-    
-    if (enabled) {
-        reg_val |= 0x20;
-    } else {
-        reg_val &= ~0x20;
-    }
-    
-    esp_err_t ret = WriteReg(0x17, reg_val);
-    return (ret == ESP_OK);
-}
-
-bool Gc2145Camera::SetVFlip(bool enabled) {
-    if (!initialized_) {
-        return false;
-    }
-    
-    uint8_t reg_val = 0;
-    ReadReg(0x17, &reg_val);
-    
-    if (enabled) {
-        reg_val |= 0x10;
-    } else {
-        reg_val &= ~0x10;
-    }
-    
-    esp_err_t ret = WriteReg(0x17, reg_val);
-    return (ret == ESP_OK);
-}
-
-std::string Gc2145Camera::Explain(const std::string& question) {
-    if (!initialized_) {
-        throw std::runtime_error("Camera not initialized");
-    }
-    
-    return "";
 }

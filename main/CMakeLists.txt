@@ -85,6 +85,16 @@ function(find_component_by_pattern PATTERN COMPONENT_VAR PATH_VAR)
     endforeach()
 endfunction()
 
+# Add esp32-camera sensors private include path for GC2145 driver
+find_component_by_pattern("espressif__esp32-camera" ESP32_CAMERA_COMPONENT ESP32_CAMERA_PATH)
+if(ESP32_CAMERA_PATH)
+    list(APPEND INCLUDE_DIRS "${ESP32_CAMERA_PATH}/sensors/private_include")
+    list(APPEND INCLUDE_DIRS "${ESP32_CAMERA_PATH}/driver/private_include")
+    message(STATUS "Added esp32-camera private include paths:")
+    message(STATUS "  - ${ESP32_CAMERA_PATH}/sensors/private_include")
+    message(STATUS "  - ${ESP32_CAMERA_PATH}/driver/private_include")
+endif()
+
 # Set default BUILTIN_TEXT_FONT and BUILTIN_ICON_FONT
 set(BUILTIN_TEXT_FONT font_puhui_14_1)
 set(BUILTIN_ICON_FONT font_awesome_14_1)
