@@ -488,3 +488,159 @@ std::string Gc2145Camera::Explain(const std::string& question) {
              (int)frame_buffer_size_, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
     return result;
 }
+
+namespace {
+    lv_obj_t* g_preview_container = nullptr;
+}
+void Gc2145Camera::PreviewLoop() {
+    ESP_LOGI(TAG, "Preview loop started");
+    
+    while (preview_running_) {
+        camera_fb_t* fb = esp_camera_fb_get();
+        if (!fb) {
+            ESP_LOGE(TAG, "Failed to get camera frame buffer in preview");
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        
+        auto& board = Board::GetInstance();
+        auto display = board.GetDisplay();
+        auto lcd_display = dynamic_cast<LcdDisplay*>(display);
+        
+        if (lcd_display && fb->format == PIXFORMAT_RGB565) {
+            size_t image_size = fb->len;
+            int stride = fb->width * 2;
+            
+            try {
+                uint8_t* image_data = (uint8_t*)heap_caps_malloc(image_size, MALLOC_CAP_SPIRAM);
+                if (image_data) {
+                    uint16_t* src = (uint16_t*)fb->buf;
+                    uint16_t* dst = (uint16_t*)image_data;
+                    size_t pixel_count = fb->width * fb->height;
+                    
+                    for (size_t i = 0; i < pixel_count; i++) {
+                        dst[i] = __builtin_bswap16(src[i]);
+                    }
+                    
+                    auto lvgl_image = std::make_unique<LvglAllocatedImage>(
+                        image_data, image_size, 
+                        fb->width, fb->height, 
+                        stride, LV_COLOR_FORMAT_RGB565
+                    );
+                    
+                    DisplayLockGuard lock(lcd_display);
+                    
+                    lv_obj_t* screen = lv_screen_active();
+                    
+                    if (g_preview_container) {
+                        lv_obj_del(g_preview_container);
+                        g_preview_container = nullptr;
+                    }
+                    
+                    auto img_dsc = lvgl_image->image_dsc();
+                    
+                    lv_coord_t max_preview_width = 120;
+                    lv_coord_t max_preview_height = 90;
+                    
+                    lv_coord_t img_width = img_dsc->header.w;
+                    lv_coord_t img_height = img_dsc->header.h;
+                    
+                    lv_coord_t zoom_w = (max_preview_width * 256) / img_width;
+                    lv_coord_t zoom_h = (max_preview_height * 256) / img_height;
+                    lv_coord_t zoom = (zoom_w < zoom_h) ? zoom_w : zoom_h;
+                    
+                    if (zoom > 256) zoom = 256;
+                    
+                    lv_coord_t scaled_width = (img_width * zoom) / 256;
+                    lv_coord_t scaled_height = (img_height * zoom) / 256;
+                    
+                    g_preview_container = lv_obj_create(screen);
+                    lv_obj_set_size(g_preview_container, scaled_width + 4, scaled_height + 4);
+                    lv_obj_align(g_preview_container, LV_ALIGN_TOP_RIGHT, -5, 5);
+                    lv_obj_set_style_radius(g_preview_container, 2, 0);
+                    lv_obj_set_style_border_width(g_preview_container, 1, 0);
+                    lv_obj_set_style_border_color(g_preview_container, lv_color_hex(0x00FF00), 0);
+                    lv_obj_set_style_bg_opa(g_preview_container, LV_OPA_TRANSP, 0);
+                    lv_obj_set_style_pad_all(g_preview_container, 0, 0);
+                    lv_obj_add_flag(g_preview_container, LV_OBJ_FLAG_FLOATING);
+                    lv_obj_add_flag(g_preview_container, LV_OBJ_FLAG_IGNORE_LAYOUT);
+                    lv_obj_remove_flag(g_preview_container, LV_OBJ_FLAG_SCROLLABLE);
+                    
+                    lv_obj_t* preview_img = lv_image_create(g_preview_container);
+                    lv_obj_set_pos(preview_img, 2, 2);
+                    lv_obj_set_size(preview_img, scaled_width, scaled_height);
+                    
+                    lv_image_set_src(preview_img, img_dsc);
+                    lv_image_set_scale(preview_img, zoom);
+                    lv_image_set_antialias(preview_img, false);
+                    
+                    LvglImage* raw_image = lvgl_image.release();
+                    lv_obj_add_event_cb(g_preview_container, [](lv_event_t* e) {
+                        LvglImage* img = (LvglImage*)lv_event_get_user_data(e);
+                        if (img != nullptr) {
+                            delete img;
+                        }
+                    }, LV_EVENT_DELETE, (void*)raw_image);
+                    
+                } else {
+                    ESP_LOGE(TAG, "Failed to allocate memory for preview image");
+                }
+            } catch (const std::exception& e) {
+                ESP_LOGE(TAG, "Failed to display preview image: %s", e.what());
+            }
+        }
+        
+        esp_camera_fb_return(fb);
+        
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+    ESP_LOGI(TAG, "Preview loop ended");
+}
+
+void Gc2145Camera::StartPreview() {
+    if (preview_mode_) {
+        ESP_LOGW(TAG, "Preview already active");
+        return;
+    }
+    
+    if (!initialized_) {
+        ESP_LOGE(TAG, "Camera not initialized");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Starting camera preview");
+    preview_mode_ = true;
+    preview_running_ = true;
+    
+    preview_thread_ = std::thread([this]() {
+        PreviewLoop();
+    });
+}
+
+void Gc2145Camera::StopPreview() {
+    if (!preview_mode_) {
+        ESP_LOGW(TAG, "Preview not active");
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Stopping camera preview");
+    preview_running_ = false;
+    
+    if (preview_thread_.joinable()) {
+        preview_thread_.join();
+    }
+    
+    preview_mode_ = false;
+    
+    auto& board = Board::GetInstance();
+    auto display = board.GetDisplay();
+    auto lcd_display = dynamic_cast<LcdDisplay*>(display);
+    if (lcd_display) {
+        DisplayLockGuard lock(lcd_display);
+        if (g_preview_container) {
+            lv_obj_del(g_preview_container);
+            g_preview_container = nullptr;
+        }
+    }
+}

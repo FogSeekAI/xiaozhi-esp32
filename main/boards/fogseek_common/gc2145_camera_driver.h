@@ -29,6 +29,13 @@ private:
     std::string explain_token_;
     std::thread encoder_thread_;
     
+    // Preview mode support
+    bool preview_mode_ = false;
+    std::thread preview_thread_;
+    volatile bool preview_running_ = false;
+    
+    void PreviewLoop();
+    
 public:
     Gc2145Camera(i2c_master_bus_handle_t i2c_bus);
     virtual ~Gc2145Camera();
@@ -46,4 +53,9 @@ public:
     size_t GetFrameSize() const { return frame_buffer_size_; }
     uint16_t GetWidth() const { return frame_width_; }
     uint16_t GetHeight() const { return frame_height_; }
+    
+    // Preview mode control
+    void StartPreview();
+    void StopPreview();
+    bool IsPreviewActive() const { return preview_mode_; }
 };

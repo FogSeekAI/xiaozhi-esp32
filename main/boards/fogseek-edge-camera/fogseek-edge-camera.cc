@@ -215,8 +215,18 @@ private:
                              {
 
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState();
-                                 ESP_LOGI(TAG, "Clicked"); });
+                                 
+                                 if (gc2145_camera_) {
+                                     if (gc2145_camera_->IsPreviewActive()) {
+                                         gc2145_camera_->StopPreview();
+                                         ESP_LOGI(TAG, "Preview stopped");
+                                     } else {
+                                         gc2145_camera_->StartPreview();
+                                         ESP_LOGI(TAG, "Preview started");
+                                     }
+                                 } else {
+                                     app.ToggleChatState();
+                                 } });
 
         ctrl_button_.OnDoubleClick([this]()
                                    {
