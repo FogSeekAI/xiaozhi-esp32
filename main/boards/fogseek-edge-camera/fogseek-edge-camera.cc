@@ -14,6 +14,7 @@
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
 #include "esp_video.h"
+#include "gc2145_camera_driver.h"
 #include "esp_lcd_panel_io_spi_expander.h"
 #include "display/lcd_display.h"
 #include "display/emote_display.h"
@@ -39,6 +40,8 @@
 #include <sstream>
 #include <thread>
 #include <stdexcept>
+#include <driver/i2s_std.h>
+
 
 
 #define TAG "FogSeekEdgeCamera"
@@ -62,6 +65,7 @@ private:
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t button_monitor_timer_ = nullptr;
     EspVideo* camera_ = nullptr;
+    Gc2145Camera* gc2145_camera_ = nullptr;
     Display* display_ = nullptr;
     esp_lcd_panel_io_handle_t lcd_io_ = nullptr;
     esp_lcd_panel_handle_t lcd_panel_ = nullptr;
@@ -242,53 +246,36 @@ private:
 
     void InitializeCamera()
     {
-        ESP_LOGI(TAG, "Initializing GC2145 camera using esp_video...");
+        ESP_LOGI(TAG, "Initializing GC2145 camera using direct SCCB driver...");
         
-        static esp_cam_ctlr_dvp_pin_config_t dvp_pin_config = {
-            .data_width = CAM_CTLR_DATA_WIDTH_8,
-            .data_io = {
-                [0] = CAMERA_PIN_D2,
-                [1] = CAMERA_PIN_D3,
-                [2] = CAMERA_PIN_D4,
-                [3] = CAMERA_PIN_D5,
-                [4] = CAMERA_PIN_D6,
-                [5] = CAMERA_PIN_D7,
-                [6] = CAMERA_PIN_D8,
-                [7] = CAMERA_PIN_D9,
-            },
-            .vsync_io = CAMERA_PIN_VSYNC,
-            .de_io = CAMERA_PIN_HREF,
-            .pclk_io = CAMERA_PIN_PCLK,
-            .xclk_io = CAMERA_PIN_XCLK,
-        };
-
-        esp_video_init_sccb_config_t sccb_config = {
-            .init_sccb = false,
-            .i2c_handle = i2c_bus_,
-            .freq = 100000,
-        };
-
-        esp_video_init_dvp_config_t dvp_config = {
-            .sccb_config = sccb_config,
-            .reset_pin = CAMERA_PIN_RESET,
-            .pwdn_pin = CAMERA_PIN_PWDN,
-            .dvp_pin = dvp_pin_config,
-            .xclk_freq = CAMERA_XCLK_FREQ_HZ,
-        };
-
-        esp_video_init_config_t video_config = {
-            .dvp = &dvp_config,
-        };
-
-        camera_ = new EspVideo(video_config);
+        // 创建 GC2145 摄像头实例
+        gc2145_camera_ = new Gc2145Camera(i2c_bus_);
         
-        if (!camera_) {
-            ESP_LOGE(TAG, "Failed to create EspVideo instance");
+        if (!gc2145_camera_) {
+            ESP_LOGE(TAG, "Failed to create GC2145 camera instance");
+            return;
+        }
+        
+        // 初始化传感器
+        esp_err_t ret = gc2145_camera_->InitSensor();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize GC2145 sensor: %d", ret);
+            delete gc2145_camera_;
+            gc2145_camera_ = nullptr;
+            return;
+        }
+        
+        // 配置分辨率 (QVGA: 320x240)
+        ret = gc2145_camera_->ConfigureResolution(320, 240);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure resolution: %d", ret);
+            delete gc2145_camera_;
+            gc2145_camera_ = nullptr;
             return;
         }
         
         camera_initialized_ = true;
-        ESP_LOGI(TAG, "GC2145 camera initialized successfully via esp_video");
+        ESP_LOGI(TAG, "GC2145 camera initialized successfully");
     }
 
     void EnableLcdCs(bool enable)
@@ -513,7 +500,7 @@ public:
 
     virtual Camera* GetCamera() override
     {
-        return camera_;
+        return gc2145_camera_;
     }
 
     virtual Display* GetDisplay() override {
@@ -541,6 +528,11 @@ public:
             esp_lcd_panel_io_del(lcd_io_);
         }
         spi_bus_free(SPI2_HOST);
+
+        if (gc2145_camera_) {
+            delete gc2145_camera_;
+            gc2145_camera_ = nullptr;
+        }
 
         camera_ = nullptr;
 
