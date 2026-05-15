@@ -41,6 +41,8 @@
 #include <thread>
 #include <stdexcept>
 #include <driver/i2s_std.h>
+#include "motor_controller.h"
+
 
 
 
@@ -70,6 +72,7 @@ private:
     esp_lcd_panel_io_handle_t lcd_io_ = nullptr;
     esp_lcd_panel_handle_t lcd_panel_ = nullptr;
     esp_lcd_panel_handle_t panel_handle = NULL;
+    FogSeekMotorController motor_controller_;
 
     bool camera_initialized_ = false;
 
@@ -384,7 +387,16 @@ private:
     }
 
 
-    
+    void InitializeServo()
+    {
+        // 初始化第一个舵机（IO3）- 例如：云台水平控制
+        motor_controller_.InitializeServo(SERVO_ID_1, SERVO_GPIO_1);
+        ESP_LOGI(TAG, "Servo 1 initialized on GPIO %d", SERVO_GPIO_1);
+        
+        // 初始化第二个舵机（IO39）- 例如：云台垂直控制
+        motor_controller_.InitializeServo(SERVO_ID_2, SERVO_GPIO_2);
+        ESP_LOGI(TAG, "Servo 2 initialized on GPIO %d", SERVO_GPIO_2);
+    }
     
 
     
@@ -400,6 +412,45 @@ private:
                 return "{\"status\": \"entering_wifi_config_mode\"}";
             });
 
+        // 第一个舵机工具（例如：云台水平）
+        mcp_server.AddTool("servo1.set_angle",
+            "Set servo 1 angle (horizontal pan) to specified position (0-180 degrees)",
+            PropertyList({
+                Property("angle", kPropertyTypeInteger)
+            }), [this](const PropertyList& properties) -> std::string {
+                int angle = properties["angle"].value<int>();
+                if (angle < 0) angle = 0;
+                if (angle > 180) angle = 180;
+                motor_controller_.SetAngle(SERVO_ID_1, angle);
+                return "{\"status\": \"success\", \"servo_id\": 1, \"angle\": " + std::to_string(angle) + "}";
+            });
+
+        mcp_server.AddTool("servo1.get_angle",
+            "Get current servo 1 angle (horizontal pan)",
+            PropertyList(), [this](const PropertyList& properties) -> std::string {
+                uint16_t angle = motor_controller_.GetAngle(SERVO_ID_1);
+                return "{\"status\": \"success\", \"servo_id\": 1, \"angle\": " + std::to_string(angle) + "}";
+            });
+
+        // 第二个舵机工具（例如：云台垂直）
+        mcp_server.AddTool("servo2.set_angle",
+            "Set servo 2 angle (vertical tilt) to specified position (0-180 degrees)",
+            PropertyList({
+                Property("angle", kPropertyTypeInteger)
+            }), [this](const PropertyList& properties) -> std::string {
+                int angle = properties["angle"].value<int>();
+                if (angle < 0) angle = 0;
+                if (angle > 180) angle = 180;
+                motor_controller_.SetAngle(SERVO_ID_2, angle);
+                return "{\"status\": \"success\", \"servo_id\": 2, \"angle\": " + std::to_string(angle) + "}";
+            });
+
+        mcp_server.AddTool("servo2.get_angle",
+            "Get current servo 2 angle (vertical tilt)",
+            PropertyList(), [this](const PropertyList& properties) -> std::string {
+                uint16_t angle = motor_controller_.GetAngle(SERVO_ID_2);
+                return "{\"status\": \"success\", \"servo_id\": 2, \"angle\": " + std::to_string(angle) + "}";
+            });
         
     }
 
@@ -478,6 +529,7 @@ public:
         InitializeLedController();
         InitializeCtrlButton();
         InitializeCamera();
+        InitializeServo();
         InitializeTools();
 
         if (display_) {
@@ -521,6 +573,11 @@ public:
         static Tca6408aBacklight backlight(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL);
         return &backlight;
     }
+
+    FogSeekMotorController* GetMotorController() {
+        return &motor_controller_;
+    }
+
 
     ~FogSeekEdgeCamera()
     {
