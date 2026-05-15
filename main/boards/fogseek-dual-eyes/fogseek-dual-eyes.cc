@@ -174,7 +174,7 @@ private:
             panel_config_1.reset_gpio_num = DISPLAY_GC9D01_RESET_GPIO;
             panel_config_1.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
             panel_config_1.bits_per_pixel = 16;
-            ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_1, &panel_config_1, &panel_1));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_1, &panel_config_1, &panel_1));
         
 
             esp_lcd_panel_reset(panel_1);

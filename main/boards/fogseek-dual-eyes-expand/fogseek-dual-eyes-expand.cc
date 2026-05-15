@@ -405,7 +405,10 @@ public:
         return dual_display_;
         //return display_2;
     }
-
+    virtual Led *GetLed() override
+    {
+        return led_controller_.GetGreenLed();
+    }
     virtual AudioCodec *GetAudioCodec() override
     {
         static Es8389AudioCodec audio_codec(
