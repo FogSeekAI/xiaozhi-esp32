@@ -217,7 +217,9 @@ void UartTransport::UartReceiveTask()
                     msg_type != MSG_TYPE_AUDIO_CONTROL &&
                     msg_type != MSG_TYPE_VOLUME_CONTROL &&
                     msg_type != MSG_TYPE_ACK &&
-                    msg_type != MSG_TYPE_ERROR)
+                    msg_type != MSG_TYPE_ERROR &&
+                    msg_type != MSG_TYPE_WIFI_PROVISIONING &&
+                    msg_type != MSG_TYPE_WIFI_STATUS)
                 {
                     ESP_LOGW(TAG, "Unknown message type: 0x%02X", msg_type);
                     SendErrorResponse(ERROR_UNKNOWN_TYPE);
@@ -237,9 +239,31 @@ void UartTransport::UartReceiveTask()
                     continue;
                 }
 
-                std::string content((char *)(rx_buffer + 6), str_len);
+                // 对于WiFi配网和WiFi状态消息，直接传递完整的Payload
+                std::string content;
+                if (msg_type == MSG_TYPE_WIFI_PROVISIONING || msg_type == MSG_TYPE_WIFI_STATUS)
+                {
+                    // 直接复制整个Payload
+                    content.assign(reinterpret_cast<char*>(rx_buffer + 5), payload_len);
+                    ESP_LOGI(TAG, "✓ Received WiFi frame: Type=0x%02X, PayloadLen=%d", msg_type, payload_len);
+                }
+                else
+                {
+                    // 原有的字符串格式解析
+                    uint8_t str_len = rx_buffer[5];
 
-                ESP_LOGI(TAG, "✓ Received: Type=0x%02X, Content=\"%s\"", msg_type, content.c_str());
+                    if (str_len > payload_len - 1)
+                    {
+                        ESP_LOGW(TAG, "Invalid string length");
+                        SendErrorResponse(ERROR_LENGTH_ERROR);
+                        memmove(rx_buffer, rx_buffer + 1, rx_index - 1);
+                        rx_index--;
+                        continue;
+                    }
+
+                    content.assign(reinterpret_cast<char*>(rx_buffer + 6), str_len);
+                    ESP_LOGI(TAG, "✓ Received: Type=0x%02X, Content=\"%s\"", msg_type, content.c_str());
+                }
 
                 // 调用回调函数，将消息类型和内容传递给上层
                 if (message_callback_)
@@ -339,6 +363,59 @@ void UartTransport::SendErrorResponse(uint8_t error_code)
 
 //---------------------------------------------------
 
+// 发送原始帧（用于WiFi状态等自定义帧）
+bool UartTransport::SendRawFrame(uint8_t msg_type, const std::string& payload)
+{
+    if (!initialized_)
+    {
+        ESP_LOGE(TAG, "UART not initialized");
+        return false;
+    }
+
+    uint16_t payload_len = static_cast<uint16_t>(payload.size());
+    uint16_t frame_len = 2 + 1 + 2 + payload_len + 1 + 2;
+    
+    std::vector<uint8_t> buffer(frame_len);
+    size_t idx = 0;
+
+    // 帧头
+    buffer[idx++] = PROTOCOL_HEADER_1;
+    buffer[idx++] = PROTOCOL_HEADER_2;
+    
+    // 类型
+    buffer[idx++] = msg_type;
+    
+    // 长度（小端格式）
+    buffer[idx++] = payload_len & 0xFF;
+    buffer[idx++] = (payload_len >> 8) & 0xFF;
+    
+    // Payload
+    if (payload_len > 0)
+    {
+        memcpy(&buffer[idx], payload.data(), payload_len);
+        idx += payload_len;
+    }
+    
+    // 计算校验和：Type + Len_L + Len_H + Payload
+    uint8_t checksum_data[3 + payload_len];
+    checksum_data[0] = buffer[2];  // Type
+    checksum_data[1] = buffer[3];  // Len_L
+    checksum_data[2] = buffer[4];  // Len_H
+    if (payload_len > 0)
+    {
+        memcpy(checksum_data + 3, payload.data(), payload_len);
+    }
+    buffer[idx++] = CalculateChecksum(checksum_data, 3 + payload_len);
+    
+    // 帧尾
+    buffer[idx++] = PROTOCOL_FOOTER_1;
+    buffer[idx++] = PROTOCOL_FOOTER_2;
+
+    ESP_LOGD(TAG, "Sending raw frame: type=0x%02X, len=%d", msg_type, payload_len);
+    int sent = uart_write_bytes(uart_port_, buffer.data(), frame_len);
+    
+    return sent == frame_len;
+}
 
 // WIFI , MQTT配置-----------------------------------
 bool UartTransport::SendATCommand(const std::string& cmd, std::string& response, uint32_t timeout_ms)

@@ -19,6 +19,8 @@ typedef enum {
     MSG_TYPE_VOLUME_CONTROL = 0x03, // 音量控制命令
     MSG_TYPE_ACK = 0x05,     //应答
     MSG_TYPE_ERROR = 0x06,   //错误信息
+    MSG_TYPE_WIFI_PROVISIONING = 0x07,  // WiFi配网请求帧
+    MSG_TYPE_WIFI_STATUS = 0x08,        // WiFi状态帧
 } message_type_t;
 
 typedef enum {
@@ -38,6 +40,10 @@ typedef enum {
     ERROR_FILESIZE_ERROR = 0x09,
     ERROR_UNSUPPORTED_ANIMAL = 0x0A,
     ERROR_INVALID_VOLUME_CMD = 0x0B,
+    ERROR_WIFI_SSID_LEN = 0x0A,      // WiFi SSID长度错误
+    ERROR_WIFI_PASSWORD_LEN = 0x0B,  // WiFi密码长度错误
+    ERROR_WIFI_INVALID_CMD = 0x0C,   // WiFi命令错误
+    ERROR_WIFI_PROVISION_FAILED = 0x0D,  // WiFi配网失败
 } error_code_t;
 
 /**
@@ -176,6 +182,15 @@ public:
      * @return 发送的字节数
      */
     int SendRawData(const uint8_t* data, size_t length);
+
+     /**
+     * @brief 发送原始帧（用于WiFi状态等自定义帧）
+     * @param msg_type 消息类型
+     * @param payload 数据内容
+     * @return 是否成功
+     */
+    bool SendRawFrame(uint8_t msg_type, const std::string& payload);
+
 
     // AT 命令配置相关方法
     bool SendATCommand(const std::string& cmd, std::string& response, uint32_t timeout_ms = 1000);
