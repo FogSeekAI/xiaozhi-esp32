@@ -42,7 +42,7 @@
 #include <stdexcept>
 #include <driver/i2s_std.h>
 #include "motor_controller.h"
-
+#include "radar_sensor.h"
 
 
 
@@ -73,8 +73,12 @@ private:
     esp_lcd_panel_handle_t lcd_panel_ = nullptr;
     esp_lcd_panel_handle_t panel_handle = NULL;
     FogSeekMotorController motor_controller_;
+    RadarSensor radar_sensor_;
+
 
     bool camera_initialized_ = false;
+    bool last_radar_state_ = false;
+    esp_timer_handle_t radar_check_timer_ = nullptr;
 
 
 
@@ -392,13 +396,48 @@ private:
         // 初始化第一个舵机（IO3）- 例如：云台水平控制
         motor_controller_.InitializeServo(SERVO_ID_1, SERVO_GPIO_1);
         ESP_LOGI(TAG, "Servo 1 initialized on GPIO %d", SERVO_GPIO_1);
-        
+            
         // 初始化第二个舵机（IO39）- 例如：云台垂直控制
         motor_controller_.InitializeServo(SERVO_ID_2, SERVO_GPIO_2);
         ESP_LOGI(TAG, "Servo 2 initialized on GPIO %d", SERVO_GPIO_2);
     }
     
+    void InitializeRadarSensor()
+    {
+        radar_sensor_.Initialize(RADAR_GPIO, false, nullptr, 0, 0);
+        last_radar_state_ = radar_sensor_.ReadState();
+        ESP_LOGI(TAG, "Radar sensor initialized on GPIO %d, initial state: %s", 
+                 RADAR_GPIO, last_radar_state_ ? "DETECTED" : "CLEAR");
+    }
 
+    static void RadarCheckCallback(void* arg)
+    {
+        auto instance = static_cast<FogSeekEdgeCamera*>(arg);
+        bool current_state = instance->radar_sensor_.ReadState();
+        
+        if (current_state != instance->last_radar_state_)
+        {
+            instance->last_radar_state_ = current_state;
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "Radar State Changed: %s", 
+                     current_state ? "DETECTED (有人/物体)" : "CLEAR (无人/物体)");
+            ESP_LOGI(TAG, "========================================");
+        }
+    }
+
+    void StartRadarMonitoring()
+    {
+        esp_timer_create_args_t timer_args = {};
+        timer_args.callback = RadarCheckCallback;
+        timer_args.arg = this;
+        timer_args.name = "radar_check_timer";
+        timer_args.dispatch_method = ESP_TIMER_TASK;
+        
+        ESP_ERROR_CHECK(esp_timer_create(&timer_args, &radar_check_timer_));
+        ESP_ERROR_CHECK(esp_timer_start_periodic(radar_check_timer_, 500000)); // 500ms检查一次
+        
+        ESP_LOGI(TAG, "Radar monitoring started (check interval: 500ms)");
+    }
     
 
     void InitializeTools() {
@@ -450,6 +489,16 @@ private:
             PropertyList(), [this](const PropertyList& properties) -> std::string {
                 uint16_t angle = motor_controller_.GetAngle(SERVO_ID_2);
                 return "{\"status\": \"success\", \"servo_id\": 2, \"angle\": " + std::to_string(angle) + "}";
+            });
+
+        // 雷达状态查询工具
+        mcp_server.AddTool("radar.get_status",
+            "Get current radar sensor status (detects presence of people/objects)",
+            PropertyList(), [this](const PropertyList& properties) -> std::string {
+                bool detected = radar_sensor_.ReadState();
+                return "{\"status\": \"success\", \"radar_detected\": " + 
+                       std::string(detected ? "true" : "false") + 
+                       ", \"message\": \"" + std::string(detected ? "Object/person detected" : "No object/person detected") + "\"}";
             });
         
     }
@@ -530,7 +579,10 @@ public:
         InitializeCtrlButton();
         InitializeCamera();
         InitializeServo();
+        InitializeRadarSensor();
         InitializeTools();
+        StartRadarMonitoring();
+
 
         if (display_) {
             GetBacklight()->RestoreBrightness();
@@ -586,6 +638,13 @@ public:
             esp_timer_stop(button_monitor_timer_);
             esp_timer_delete(button_monitor_timer_);
             button_monitor_timer_ = nullptr;
+        }
+
+        if (radar_check_timer_)
+        {
+            esp_timer_stop(radar_check_timer_);
+            esp_timer_delete(radar_check_timer_);
+            radar_check_timer_ = nullptr;
         }
 
         if (lcd_panel_) {

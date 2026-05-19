@@ -107,5 +107,9 @@
 #define SERVO_GPIO_1 GPIO_NUM_3  // IO3 - 舵机 PWM 控制引脚
 #define SERVO_GPIO_2 GPIO_NUM_39  // IO39 - 第二个舵机（例如：云台垂直）
 
+// 雷达传感器引脚配置
+#define RADAR_GPIO GPIO_NUM_47  // IO47 - 雷达模块数据输入
+
+
 
 #endif
