@@ -1105,7 +1105,7 @@ void LcdDisplay::SetTheme(Theme* theme) {
     
     auto lvgl_theme = static_cast<LvglTheme*>(theme);
 
-    lv_obj_t* screen = lv_screen_active();
+    //lv_obj_t* screen = lv_screen_active();
 
     if (lvgl_theme->background_image() != nullptr) {
         lv_obj_set_style_bg_image_src(container_, lvgl_theme->background_image()->image_dsc(), 0);

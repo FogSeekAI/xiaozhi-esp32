@@ -146,11 +146,12 @@ private:
     // 初始化显示管理器
     void InitializeDisplayManager()
     {
-        esp_lcd_panel_io_handle_t panel_io_1 = nullptr;
+                esp_lcd_panel_io_handle_t panel_io_1 = nullptr;
         esp_lcd_panel_handle_t panel_1 = nullptr;
         esp_lcd_panel_io_handle_t panel_io_2 = nullptr;
         esp_lcd_panel_handle_t panel_2 = nullptr;
-        
+        Backlight *backlight_1 = nullptr;
+
         spi_bus_config_t buscfg = {};
             buscfg.mosi_io_num = DISPLAY_SPI_MOSI_GPIO;
             buscfg.miso_io_num = GPIO_NUM_NC;
@@ -168,23 +169,23 @@ private:
             io_config_1.trans_queue_depth = 10;
             io_config_1.lcd_cmd_bits = 8;
             io_config_1.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_1, &panel_io_1));
-
+        
         esp_lcd_panel_dev_config_t panel_config_1 = {};
             panel_config_1.reset_gpio_num = DISPLAY_GC9D01_RESET_GPIO;
-            panel_config_1.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+            panel_config_1.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
             panel_config_1.bits_per_pixel = 16;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_1, &panel_config_1, &panel_1));
-        
+            ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_1, &panel_io_1));
 
+            ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_1, &panel_config_1, &panel_1));
             esp_lcd_panel_reset(panel_1);
             esp_lcd_panel_init(panel_1);
             esp_lcd_panel_disp_on_off(panel_1, true);    
+
         display_1 = new SpiLcdDisplay(panel_io_1, panel_1,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, 
                                     DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
                                     DISPLAY_MIRROR_X_1, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-  
+
         esp_lcd_panel_io_spi_config_t io_config_2 = {};
             io_config_2.cs_gpio_num = DISPLAY_SPI_CS_2_GPIO;
             io_config_2.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
@@ -193,9 +194,7 @@ private:
             io_config_2.trans_queue_depth = 10;
             io_config_2.lcd_cmd_bits = 8;
             io_config_2.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_2, &panel_io_2));
-
-
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config_2, &panel_io_2));
 
         esp_lcd_panel_dev_config_t panel_config_2 = {};
             panel_config_2.reset_gpio_num = GPIO_NUM_NC;//这里需要写空
@@ -203,18 +202,16 @@ private:
             panel_config_2.bits_per_pixel = 16;
         ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_2, &panel_config_2, &panel_2));
 
-            esp_lcd_panel_reset(panel_2);
-            esp_lcd_panel_init(panel_2);
-            esp_lcd_panel_disp_on_off(panel_2, true);    
-            esp_lcd_panel_mirror(panel_2, DISPLAY_MIRROR_X_2, DISPLAY_MIRROR_Y);
-
-
-
+        esp_lcd_panel_reset(panel_2);
+        esp_lcd_panel_init(panel_2);
+        esp_lcd_panel_disp_on_off(panel_2, true);    
+        esp_lcd_panel_mirror(panel_2, DISPLAY_MIRROR_X_2, DISPLAY_MIRROR_Y);
         display_2 = new SpiLcdDisplay(panel_io_2, panel_2, 
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, 
                                     DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
                                     DISPLAY_MIRROR_X_2, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
         
+
         if (display_1 != nullptr && display_2 != nullptr) {
             dual_display_ = new DualDisplayEmotionOnly(display_1, display_2);
         }
