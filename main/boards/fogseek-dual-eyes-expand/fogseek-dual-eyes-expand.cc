@@ -64,10 +64,6 @@ public:
             if (!mutex_) {
             ESP_LOGE(TAG, "Failed to create display mutex!");
         }
-            // if (display_1_ && display_2_) 
-            // {
-            //     display_1_->SetTheme(display_2_->GetTheme());
-            // }
     }
     ~DualDisplayEmotionOnly() {
         if (mutex_) {
@@ -353,9 +349,6 @@ private:
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
         tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO, 0);
-        //display_manager_.SetBrightness(100);
-        //gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 0);
-        //backlight_1->SetBrightness(100); // 设置 100% 亮度
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
         SetAudioAmplifierState(true);
@@ -370,9 +363,6 @@ private:
     {
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-        //display_manager_.SetBrightness(0);
-        //gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 1);
-        //backlight_1->SetBrightness(0); // 设置 100% 亮度
         tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO,1);
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
@@ -385,8 +375,6 @@ private:
 public:
     FogseekDualEyesExpand() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
-        //gpio_set_direction(DISPLAY_GC9D01_BL_GPIO, GPIO_MODE_OUTPUT);
-        //gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 1);
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();

@@ -56,10 +56,6 @@ public:
 
     DualDisplayEmotionOnly(SpiLcdDisplay* disp1, SpiLcdDisplay* disp2)
         : display_1_(disp1), display_2_(disp2) {
-            if (display_1_ && display_2_) 
-            {
-                display_1_->SetTheme(display_2_->GetTheme());
-            }
     }
 
     void SetEmotion(const char* emotion) override {
@@ -146,7 +142,7 @@ private:
     // 初始化显示管理器
     void InitializeDisplayManager()
     {
-                esp_lcd_panel_io_handle_t panel_io_1 = nullptr;
+        esp_lcd_panel_io_handle_t panel_io_1 = nullptr;
         esp_lcd_panel_handle_t panel_1 = nullptr;
         esp_lcd_panel_io_handle_t panel_io_2 = nullptr;
         esp_lcd_panel_handle_t panel_2 = nullptr;
@@ -302,9 +298,10 @@ private:
 
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
-        //display_manager_.SetBrightness(100);
         gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 0);
-        //backlight_1->SetBrightness(100); // 设置 100% 亮度
+        if (dual_display_ && dual_display_->display_1_ && dual_display_->display_2_) {
+        dual_display_->display_1_->SetTheme(dual_display_->display_2_->GetTheme());
+        }
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
         SetAudioAmplifierState(true);
@@ -319,9 +316,7 @@ private:
     {
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-        //display_manager_.SetBrightness(0);
         gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 1);
-        //backlight_1->SetBrightness(0); // 设置 100% 亮度
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
         SetAudioAmplifierState(false);
