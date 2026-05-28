@@ -191,7 +191,8 @@ private:
         // 长按light_button_切换到联网模式
         light_button_.OnLongPress([this]()
                                   {
-                                
+                                    auto codec = GetAudioCodec();
+                                    codec->SetOutputVolume(0); 
                         });
     }
     
