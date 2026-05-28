@@ -37,7 +37,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
-    bool offline_mode_ = true; 
+    bool offline_mode_ = false; 
 
     // 初始化I2C外设
     void InitializeI2c()
@@ -139,20 +139,6 @@ private:
         gpio_set_level(EXT_POWER_ENABLE_GPIO, enable ? 1 : 0);
     }
 
-    // 切换到联网模式
-    void SwitchToOnlineMode() {
-        if (offline_mode_) {
-            offline_mode_ = false;
-            WifiBoard::StartNetwork();
-        }
-    }
-
-    virtual void StartNetwork() override {
-        if (!offline_mode_) {
-            WifiBoard::StartNetwork();
-        }
-    }
-
     // 初始化按键回调
     void InitializeButtonCallbacks()
     {
@@ -205,10 +191,8 @@ private:
         // 长按light_button_切换到联网模式
         light_button_.OnLongPress([this]()
                                   {
-                                      if (offline_mode_) {
-                                          SwitchToOnlineMode();
-                                      }
-                                  });
+                                
+                        });
     }
     
 
@@ -224,13 +208,6 @@ private:
             {
                 app.PlaySound(Lang::Sounds::OGG_SUCCESS);
                 vTaskDelay(pdMS_TO_TICKS(500)); // 延时500ms播放音效
-            }
-            // 在离线模式下不自动唤醒AI对话
-            if (!offline_mode_) {
-                app.Schedule([]()
-                         {
-                            auto &app = Application::GetInstance();
-                            app.ToggleChatState(); });
             }
         }
         else
@@ -316,7 +293,7 @@ public:
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
         // 开机进入离线模式，不自动启动网络
-        offline_mode_ = true;
+        offline_mode_ = false;
     }
 
     virtual Led *GetLed() override
