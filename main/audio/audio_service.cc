@@ -120,6 +120,11 @@ void AudioService::Initialize(AudioCodec* codec) {
         .skip_unhandled_events = true,
     };
     esp_timer_create(&audio_power_timer_args, &audio_power_timer_);
+#if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4
+    wake_word_ = std::make_unique<AfeWakeWord>();
+#else
+    wake_word_ = std::make_unique<EspWakeWord>();
+#endif
 }
 
 void AudioService::Start() {
@@ -539,6 +544,10 @@ const std::string& AudioService::GetLastWakeWord() const {
 }
 
 std::unique_ptr<AudioStreamPacket> AudioService::PopWakeWordPacket() {
+    if (!wake_word_) {
+        ESP_LOGW(TAG, "PopWakeWordPacket called but wake_word_ is null");
+        return nullptr;
+    }
     auto packet = std::make_unique<AudioStreamPacket>();
     if (wake_word_->GetWakeWordOpus(packet->payload)) {
         return packet;

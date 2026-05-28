@@ -115,7 +115,7 @@ private:
     std::chrono::steady_clock::time_point last_radar_left_time_;
     bool radar_first_detection_ = true;
     static constexpr int RADAR_DETECTION_INTERVAL_SEC = 180;
-    static constexpr int TOUCH_TRIGGER_INTERVAL_SEC = 8;
+    static constexpr int TOUCH_TRIGGER_INTERVAL_SEC = 5;
     
     bool motor_enabled_ = false;
     esp_timer_handle_t motor_timer_ = nullptr;
@@ -145,7 +145,7 @@ private:
     
     bool touch_debouncing_ = false;                          
     std::chrono::steady_clock::time_point touch_start_time_; 
-    static constexpr int TOUCH_DEBOUNCE_MS = 400;            
+    static constexpr int TOUCH_DEBOUNCE_MS = 200;            
     
     bool sleep_warning_shown_ = false;          // 是否已显示休眠警告
     esp_timer_handle_t auto_sleep_timer_ = nullptr; // 自动休眠定时器
@@ -222,7 +222,7 @@ private:
 
         // 背光输出
         gpio_set_direction(DISPLAY_GC9D01_BL_GPIO, GPIO_MODE_OUTPUT);
-        gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 0);
+        gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 1);
     }
 
     void SetMotorState(bool enable)
@@ -281,16 +281,11 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 auto codec = GetAudioCodec();
-                                 int current_volume = codec->output_volume();
+                                //  auto codec = GetAudioCodec();
+                                //  int current_volume = codec->output_volume();
                                  gpio_set_level(MOTOR_PIN, 1);
-                                 if (current_volume > 0) {
-                                     codec->SetOutputVolume(0);
-                                     ESP_LOGI(TAG, "Muted - Volume set to 0");
-                                 } else {
-                                     codec->SetOutputVolume(70);
-                                     ESP_LOGI(TAG, "Unmuted - Volume set to 70");
-                                 }
+                                 auto &app = Application::GetInstance();
+                                 app.ToggleChatState(); // 切换聊天状态（打断）
                             
                              });
         ctrl_button_.OnDoubleClick([this]()
@@ -429,24 +424,19 @@ private:
             loop_count++;
             bool current_touch = instance->ReadTouchState();
             if (current_touch) {
-                // 检测到触摸信号
                 if (!instance->touch_debouncing_) {
-                    // 开始消抖计时
                     instance->touch_debouncing_ = true;
                     instance->touch_start_time_ = std::chrono::steady_clock::now();
                 } else {
-                    // 已在消抖中，检查是否达到阈值
                     auto now = std::chrono::steady_clock::now();
                     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                         now - instance->touch_start_time_).count();
                     
                     if (duration_ms >= TOUCH_DEBOUNCE_MS && !instance->last_touch_state_) {
-                        // 确认有效触摸！
                         instance->last_touch_state_ = true;
                         ESP_LOGI(TAG, "[#%lu] Valid touch detected (held for %ld ms)", 
                                 (unsigned long)loop_count, (long)duration_ms);
                         
-                        // 触发事件（保持原有间隔限制逻辑）
                         auto time_since_last = std::chrono::duration_cast<std::chrono::seconds>(
                             now - instance->last_touch_trigger_time_).count();
                         if (time_since_last >= instance->TOUCH_TRIGGER_INTERVAL_SEC) {
@@ -462,7 +452,6 @@ private:
                         }
                     }
                 } else {
-                    // 无触摸信号，重置状态
                     instance->touch_debouncing_ = false;
                     if (instance->last_touch_state_) {
                         instance->last_touch_state_ = false;
@@ -636,7 +625,7 @@ private:
                     DeviceState current_state = app.GetDeviceState();
                     ESP_LOGI(TAG, "Current device state for radar: %d", static_cast<int>(current_state));
                     
-                    std::string wake_word = "小可爱来了";
+                    std::string wake_word = "主人来了";
                     
                     if (current_state == DeviceState::kDeviceStateListening) {
                         ESP_LOGI(TAG, "Device is listening, need to close session first");
@@ -727,151 +716,6 @@ private:
             auto elapsed_since_last_trigger = std::chrono::duration_cast<std::chrono::seconds>(
                 now - instance->last_motor_trigger_time_).count();
             
-            if (instance->user_interaction_detected_ && !instance->greeting_sent_ && 
-                elapsed_since_last_trigger >= instance->GREETING_TIMEOUT_SEC) {
-                
-                instance->greeting_sent_ = true;
-                ESP_LOGI(TAG, "MotorTask: No interaction for %ld sec, sending greeting", 
-                        (long)elapsed_since_last_trigger);
-                
-                auto& app = Application::GetInstance();
-                DeviceState current_state = app.GetDeviceState();
-                ESP_LOGI(TAG, "Current device state for greeting: %d", static_cast<int>(current_state));
-                
-                std::string wake_word = "你好";
-                
-                if (current_state == DeviceState::kDeviceStateListening) {
-                    ESP_LOGI(TAG, "Device is listening, need to close session first");
-                    
-                    app.WakeWordInvoke(wake_word);
-                    ESP_LOGI(TAG, "First wake word sent to close listening session");
-                    
-                    vTaskDelay(pdMS_TO_TICKS(1500));
-                    
-                    DeviceState new_state = app.GetDeviceState();
-                    ESP_LOGI(TAG, "After delay, device state: %d", static_cast<int>(new_state));
-                    
-                    if (new_state == DeviceState::kDeviceStateIdle) {
-                        app.WakeWordInvoke(wake_word);
-                        ESP_LOGI(TAG, "Second wake word sent for greeting");
-                    } else {
-                        ESP_LOGW(TAG, "State not idle after delay (%d), using Schedule", static_cast<int>(new_state));
-                        app.Schedule([wake_word]() {
-                            auto& app = Application::GetInstance();
-                            app.WakeWordInvoke(wake_word);
-                        });
-                    }
-                } else if (current_state == DeviceState::kDeviceStateIdle || 
-                           current_state == DeviceState::kDeviceStateSpeaking) {
-                    
-                    app.WakeWordInvoke(wake_word);
-                    ESP_LOGI(TAG, "Sent greeting wake word: %s, state was acceptable", wake_word.c_str());
-                } else {
-                    ESP_LOGW(TAG, "Device state %d not suitable for greeting, scheduling retry", 
-                            static_cast<int>(current_state));
-                    
-                    app.Schedule([wake_word]() {
-                        auto& app = Application::GetInstance();
-                        ESP_LOGI(TAG, "Scheduled greeting wake word invoke: %s", wake_word.c_str());
-                        app.WakeWordInvoke(wake_word);
-                    });
-                }
-            }
-           // 获取空闲时间（只定义一次）
-// auto now = std::chrono::steady_clock::now();
-// auto elapsed_since_last_trigger = std::chrono::duration_cast<std::chrono::seconds>(
-//     now - instance->last_motor_trigger_time_).count();
-
-// // 阶段1: 空闲超时，显示休眠警告并启动定时器
-// if (instance->user_interaction_detected_ && !instance->sleep_warning_shown_ && 
-//     elapsed_since_last_trigger >= instance->GREETING_TIMEOUT_SEC) {
-    
-//     instance->sleep_warning_shown_ = true;
-//     ESP_LOGI(TAG, "MotorTask: No interaction for %ld sec, showing sleep warning", 
-//              (long)elapsed_since_last_trigger);
-
-//     // 显示警告消息
-//     auto* display = Board::GetInstance().GetDisplay();
-//     if (display) {
-//         display->SetChatMessage("assistant", "两分钟后休眠");
-//     }
-
-//     // 让AI说话
-//     auto& app = Application::GetInstance();
-//     DeviceState current_state = app.GetDeviceState();
-//     std::string wake_word = "两分钟后休眠";
-    
-//     if (current_state == DeviceState::kDeviceStateListening) {
-//         app.WakeWordInvoke(wake_word);
-//         vTaskDelay(pdMS_TO_TICKS(1500));
-//         DeviceState new_state = app.GetDeviceState();
-//         if (new_state == DeviceState::kDeviceStateIdle) {
-//             app.WakeWordInvoke(wake_word);
-//         } else {
-//             app.Schedule([wake_word]() {
-//                 Application::GetInstance().WakeWordInvoke(wake_word);
-//             });
-//         }
-//     } else if (current_state == DeviceState::kDeviceStateIdle || 
-//                current_state == DeviceState::kDeviceStateSpeaking) {
-//         app.WakeWordInvoke(wake_word);
-//     } else {
-//         app.Schedule([wake_word]() {
-//             Application::GetInstance().WakeWordInvoke(wake_word);
-//         });
-//     }
-
-//     // 取消已有的定时器（如果有）
-//     if (instance->auto_sleep_timer_ != nullptr) {
-//         esp_timer_stop(instance->auto_sleep_timer_);
-//         esp_timer_delete(instance->auto_sleep_timer_);
-//         instance->auto_sleep_timer_ = nullptr;
-//     }
-    
-//     // 创建新的定时器
-//     esp_timer_create_args_t timer_args = {};
-//     timer_args.callback = [](void *arg) {
-//         auto* inst = static_cast<FogSeekNanoToy2*>(arg);
-//         ESP_LOGI(TAG, "Auto sleep triggered after 2 minutes");
-//         Application::GetInstance().Schedule([inst]() {
-//             // 只在这里调用 ToggleChatState()，确保在2分钟后才休眠
-//             Application::GetInstance().ToggleChatState();
-//             //Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
-//             inst->sleep_warning_shown_ = false;
-//             inst->greeting_sent_ = false;
-//             inst->auto_sleep_timer_ = nullptr;
-//         });
-//     };
-//     timer_args.arg = instance;
-//     timer_args.name = "auto_sleep";
-    
-//     esp_err_t ret = esp_timer_create(&timer_args, &instance->auto_sleep_timer_);
-//     if (ret == ESP_OK) {
-//         esp_timer_start_once(instance->auto_sleep_timer_, 20 * 1000000LL);
-//         ESP_LOGI(TAG, "Sleep timer started (120 seconds)");
-//     } else {
-//         ESP_LOGE(TAG, "Failed to create sleep timer: %d", ret);
-//     }
-// }
-
-// 阶段2: 重置休眠状态 (有新交互时)
-// bool has_user_interaction = (events & (instance->MOTOR_TOGGLE_EVENT | 
-//                                        instance->RADAR_DETECTED_EVENT));
-
-// if (has_user_interaction) {
-//     if (instance->auto_sleep_timer_ != nullptr) {
-//         esp_timer_stop(instance->auto_sleep_timer_);
-//         esp_timer_delete(instance->auto_sleep_timer_);
-//         instance->auto_sleep_timer_ = nullptr;
-//         ESP_LOGI(TAG, "MotorTask: Sleep timer stopped due to user interaction");
-//     }
-    
-//     instance->sleep_warning_shown_ = false;
-//     instance->greeting_sent_ = false;
-//     instance->last_motor_trigger_time_ = std::chrono::steady_clock::now();
-    
-//     ESP_LOGI(TAG, "MotorTask: User interaction detected, reset sleep timer");
-// }
         
             if (instance->user_interaction_detected_ && instance->greeting_sent_ && 
                 !instance->vitality_displayed_ && 
@@ -978,12 +822,14 @@ private:
     {
         power_manager_.PowerOn();
         led_controller_.UpdateLedStatus(power_manager_);
-
+        auto codec = GetAudioCodec();
+        codec->SetOutputVolume(70); // 开机后将音量设置为默认值
         ESP_LOGI(TAG, "Device powered on.");
         gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 0);
          if (dual_display_ && dual_display_->display_1_ && dual_display_->display_2_) {
         dual_display_->display_1_->SetTheme(dual_display_->display_2_->GetTheme());
         }
+        //task_flag = true;
         StartSensorMonitoring();
         HandleAutoWake();
     }
@@ -994,6 +840,10 @@ private:
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
         gpio_set_level(DISPLAY_GC9D01_BL_GPIO, 1); 
+        auto codec = GetAudioCodec();
+        codec->SetOutputVolume(0); // 关机后将音量设置为默0
+        gpio_set_level(MOTOR_PIN, 0); 
+        //task_flag = false;
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
 
         ESP_LOGI(TAG, "Device powered off.");
@@ -1081,5 +931,5 @@ public:
   
     }
 };
-
+//bool FogSeekNanoToy2::task_flag = false;
 DECLARE_BOARD(FogSeekNanoToy2);
