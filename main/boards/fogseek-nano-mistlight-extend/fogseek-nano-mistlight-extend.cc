@@ -37,6 +37,7 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
+    bool offline_mode_ = true; 
 
     // 初始化I2C外设
     void InitializeI2c()
@@ -98,7 +99,7 @@ private:
         // 设置为高电平
         gpio_set_level(GPIO_NUM_2, 1);
         gpio_set_level(GPIO_NUM_43, 1);
-        gpio_set_level(GPIO_NUM_5, 1);
+        gpio_set_level(GPIO_NUM_5, 0);
     }
     // 初始化音频功放引脚并默认关闭功放
     void InitializeAudioAmplifier()
@@ -138,13 +139,29 @@ private:
         gpio_set_level(EXT_POWER_ENABLE_GPIO, enable ? 1 : 0);
     }
 
+    // 切换到联网模式
+    void SwitchToOnlineMode() {
+        if (offline_mode_) {
+            offline_mode_ = false;
+            WifiBoard::StartNetwork();
+        }
+    }
+
+    virtual void StartNetwork() override {
+        if (!offline_mode_) {
+            WifiBoard::StartNetwork();
+        }
+    }
+
     // 初始化按键回调
     void InitializeButtonCallbacks()
     {
         ctrl_button_.OnClick([this]()
                              {
                                  auto &app = Application::GetInstance();
-                                 app.ToggleChatState(); // 切换聊天状态（打断）
+                                 if (!offline_mode_) {
+                                     app.ToggleChatState(); // 切换聊天状态（打断）
+                                 }
                              });
         ctrl_button_.OnDoubleClick([this]()
                                    {
@@ -153,7 +170,10 @@ private:
                                     {
                                         EnterWifiConfigMode();
                                         return;
-                                    } });
+                                    } 
+                                    if (!offline_mode_) {
+                                    }
+                                   });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -163,45 +183,31 @@ private:
                 PowerOff();
             } });
          light_button_.OnClick([this]()
-                              {
-                                  // 循环切换RGB灯带颜色
-                                  static int color_index = 0;
-                                  auto rgb_strip = led_controller_.GetRgbLedStrip();
-                                  switch (color_index)
-                                  {
-                                  case 0:
-                                      rgb_strip->SetAllColor({255, 0, 255}); // 紫色
-                                      break;
-                                  case 1:
-                                      rgb_strip->SetAllColor({0, 255, 0}); // 绿色
-                                      break;
-                                  case 2:
-                                      rgb_strip->SetAllColor({255, 255, 0}); // 黄色
-                                      break;
-                                  case 3:
-                                      rgb_strip->SetAllColor({0, 0, 255}); // 蓝色
-                                      break;
-                                  case 4:
-                                      rgb_strip->SetAllColor({255, 165, 0}); // 橙色
-                                      break;
-                                  case 5:
-                                      rgb_strip->SetAllColor({0, 255, 255}); // 青色
-                                      break;
-                                  default:
-                                      rgb_strip->SetAllColor({255, 255, 255}); // 白色
-                                      break;
-                                  }
-                                  color_index = (color_index + 1) % 7; // 循环使用7种颜色
-                              });
+                                {
+                                    //单击切换为普通模式（离线模式下可用）
+                                    fragrance_controller_.SetMode(FragranceController::Mode::NORMAL_MODE);
+                                });
         light_button_.OnDoubleClick([this]()
                                    {
-                                       // 双击关灯
-                                       led_controller_.GetRgbLedStrip()->SetAllColor({0, 0, 0});
+                                    // 双击切换为工作模式（离线模式下可用）
+                                    fragrance_controller_.SetMode(FragranceController::Mode::WORK_MODE);
                                    });
+        light_button_.OnMultipleClick([this]()
+                                {
+                                    // 三击切换为解压模式（离线模式下可用）
+                                    fragrance_controller_.SetMode(FragranceController::Mode::STRESS_RELIEF_MODE);
+                                }, 3);
+        light_button_.OnMultipleClick([this]()
+                                  {
+                                    // 四击切换为助眠模式（离线模式下可用）
+                                    fragrance_controller_.SetMode(FragranceController::Mode::SLEEP_AID_MODE);
+                                  }, 4);
+        // 长按light_button_切换到联网模式
         light_button_.OnLongPress([this]()
                                   {
-                                      // 长按：呼吸效果
-                                       led_controller_.StartBreathingEffect(5000);
+                                      if (offline_mode_) {
+                                          SwitchToOnlineMode();
+                                      }
                                   });
     }
     
@@ -219,10 +225,13 @@ private:
                 app.PlaySound(Lang::Sounds::OGG_SUCCESS);
                 vTaskDelay(pdMS_TO_TICKS(500)); // 延时500ms播放音效
             }
-            app.Schedule([]()
+            // 在离线模式下不自动唤醒AI对话
+            if (!offline_mode_) {
+                app.Schedule([]()
                          {
                             auto &app = Application::GetInstance();
                             app.ToggleChatState(); });
+            }
         }
         else
         {
@@ -250,7 +259,7 @@ private:
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
         SetAudioAmplifierState(true);
-
+        gpio_set_level(GPIO_NUM_5, 1);
         SetExtensionPowerEnableState(true); // 开机时打开扩展板电源使能
 
         ESP_LOGI(TAG, "Device powered on.");
@@ -262,11 +271,10 @@ private:
     void PowerOff()
     {
         SetExtensionPowerEnableState(false); // 关机时关闭扩展板电源使能
-        //rgb_led_strip_->SetAllColor({0, 0, 0});
         led_controller_.GetRgbLedStrip()->SetAllColor({0, 0, 0});
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
-
+        gpio_set_level(GPIO_NUM_5, 0);
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
         SetAudioAmplifierState(false);
@@ -307,6 +315,8 @@ public:
         // 设置电源状态变化回调函数
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
+        // 开机进入离线模式，不自动启动网络
+        offline_mode_ = true;
     }
 
     virtual Led *GetLed() override
@@ -339,13 +349,6 @@ public:
         {
             i2c_del_master_bus(i2c_bus_);
         }
-
-        // 删除RGB灯带对象
-        // if (rgb_led_strip_)
-        // {
-        //     delete rgb_led_strip_;
-        //     rgb_led_strip_ = nullptr;
-        // }
     }
 };
 

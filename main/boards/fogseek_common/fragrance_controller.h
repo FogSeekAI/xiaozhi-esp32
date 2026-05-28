@@ -39,7 +39,7 @@ private:
 
     // 定时器句柄
     esp_timer_handle_t cycle_timer_ = nullptr;
-
+    esp_timer_handle_t sleep_mode_stop_timer_ = nullptr; // 助眠模式停止定时器
     // 模式特定参数
     uint32_t active_duration_ = 0; // 活跃阶段持续时间
     uint32_t cycle_duration_ = 0;  // 整个周期持续时间
@@ -48,6 +48,8 @@ private:
     void SetSleepAidModeParams();
     void SetStressReliefModeParams();
     
+    void StartSleepModeStopTimer();
+    void StopSleepModeStopTimer();
 
     void StartCycleTimer();
     void StopCycleTimer();

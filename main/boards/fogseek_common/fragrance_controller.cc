@@ -31,6 +31,7 @@ void FragranceController::SetMode(Mode mode)
         case Mode::SLEEP_AID_MODE:
             SetSleepAidModeParams();
             led_controller_.StartBreathingEffect(1500);
+            StartSleepModeStopTimer();
             break;
         case Mode::STRESS_RELIEF_MODE:
             SetStressReliefModeParams();
@@ -160,6 +161,7 @@ void FragranceController::CycleTimerCallback()
 void FragranceController::StopCurrentMode()
 {
     StopCycleTimer();
+    StopSleepModeStopTimer();
 
     led_controller_.TurnOffRgbLights(100);
 
@@ -169,17 +171,17 @@ void FragranceController::StopCurrentMode()
 
 void FragranceController::SetWorkModeParams()//工作模式
 {
-    active_duration_ = 60000; // 60秒活跃时间
-    cycle_duration_ = 240000; // 240秒周期
+    active_duration_ = 10000; // 10秒活跃时间
+    cycle_duration_ = 30000; // 30秒周期
     //motor_controller_.RunMotorTimed(active_duration_);
     ESP_LOGI(FRAGRANCE_TAG, "Work mode activated: motor runs for %d ms every %d ms cycle",
              active_duration_, cycle_duration_);
 }
 
-void FragranceController::SetSleepAidModeParams()//睡眠模式
+void FragranceController::SetSleepAidModeParams()//助眠模式
 {
-    active_duration_ = 30000;   //30秒活跃时间
-    cycle_duration_ = 630000;  //630秒周期
+    active_duration_ = 10000;   //10秒活跃时间
+    cycle_duration_ = 70000;  //70秒周期
     //motor_controller_.RunMotorTimed(active_duration_);
     ESP_LOGI(FRAGRANCE_TAG, "Sleep aid mode activated: motor runs for %d ms every %d ms cycle",
              active_duration_, cycle_duration_);
@@ -187,8 +189,8 @@ void FragranceController::SetSleepAidModeParams()//睡眠模式
 
 void FragranceController::SetStressReliefModeParams()//解压模式
 {
-    active_duration_ = 60000;  // 60秒活跃时间
-    cycle_duration_ = 360000; // 360秒周期
+    active_duration_ = 10000;  // 5秒活跃时间
+    cycle_duration_ = 50000; // 40秒周期
     //motor_controller_.RunMotorTimed(active_duration_);
     ESP_LOGI(FRAGRANCE_TAG, "Stress relief mode activated: motor runs for %d ms every %d ms cycle",
              active_duration_, cycle_duration_);
@@ -198,4 +200,52 @@ void FragranceController::SetNormalModeParams()
         
         led_controller_.SetAllLightsLowBrightness();
         ESP_LOGI(FRAGRANCE_TAG, "Motor and lights turned ON");
+}
+static void SleepModeStopTimerCallback(void *arg)
+{
+    auto controller = static_cast<FragranceController *>(arg);
+    ESP_LOGI(FRAGRANCE_TAG, "Sleep mode timeout after 30 minutes, turning off fragrance");
+    controller->SetMode(FragranceController::Mode::OFF_MODE);
+}
+
+// 新增：启动助眠模式停止定时器
+void FragranceController::StartSleepModeStopTimer()
+{
+    if (current_mode_ != Mode::SLEEP_AID_MODE) {
+        return;
+    }
+    
+    if (sleep_mode_stop_timer_ != nullptr)
+    {
+        esp_timer_stop(sleep_mode_stop_timer_);
+        esp_timer_delete(sleep_mode_stop_timer_);
+        sleep_mode_stop_timer_ = nullptr;
+    }
+
+    esp_timer_create_args_t timer_args = {};
+    timer_args.callback = SleepModeStopTimerCallback; 
+    timer_args.arg = this;
+    timer_args.dispatch_method = ESP_TIMER_TASK;
+    timer_args.name = "sleep_mode_stop_timer";
+
+    esp_err_t err = esp_timer_create(&timer_args, &sleep_mode_stop_timer_);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(FRAGRANCE_TAG, "Failed to create sleep mode stop timer: %s", esp_err_to_name(err));
+        return;
+    }
+
+    esp_timer_start_once(sleep_mode_stop_timer_, 1800000000ULL); 
+    ESP_LOGI(FRAGRANCE_TAG, "Sleep mode stop timer started: will stop after 30 minutes");
+}
+
+// 新增：停止助眠模式停止定时器
+void FragranceController::StopSleepModeStopTimer()
+{
+    if (sleep_mode_stop_timer_ != nullptr)
+    {
+        esp_timer_stop(sleep_mode_stop_timer_);
+        esp_timer_delete(sleep_mode_stop_timer_);
+        sleep_mode_stop_timer_ = nullptr;
+    }
 }
