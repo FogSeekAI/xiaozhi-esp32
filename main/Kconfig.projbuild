@@ -237,6 +237,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO_DODOPET
         bool "Nano Dodopet"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_NANO_YINGZHI
+        bool "Nano Yingzhi"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_LCD_EYES
         bool "Nano LCD Eyes"
         depends on IDF_TARGET_ESP32S3

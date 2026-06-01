@@ -1,0 +1,42 @@
+#ifndef _BOARD_CONFIG_H_
+#define _BOARD_CONFIG_H_
+
+#include <driver/gpio.h>
+
+// 按钮相关配置
+#define BOOT_BUTTON_GPIO GPIO_NUM_0
+#define CTRL_BUTTON_GPIO GPIO_NUM_18
+
+// 电源相关配置
+#define PWR_HOLD_GPIO GPIO_NUM_39
+#define PWR_CHARGE_DONE_GPIO GPIO_NUM_21
+#define PWR_CHARGING_GPIO GPIO_NUM_15
+#define BATTERY_ADC_GPIO GPIO_NUM_10 // 电池电压检测ADC1_CH9
+
+// LED相关配置
+#define LED_RED_GPIO GPIO_NUM_48
+#define LED_GREEN_GPIO GPIO_NUM_47
+
+// 音频相关配置
+#define AUDIO_INPUT_SAMPLE_RATE 24000
+#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+#define AUDIO_INPUT_REFERENCE true
+
+#define AUDIO_CODEC_I2C_SCL_PIN GPIO_NUM_11 // I2C时钟线
+#define AUDIO_CODEC_I2C_SDA_PIN GPIO_NUM_12 // I2C数据线
+
+#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_38 // 主时钟
+#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_14 // 位时钟
+#define AUDIO_I2S_GPIO_WS GPIO_NUM_16   // 帧时钟
+#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_13 // 数据输出（扬声器）
+#define AUDIO_I2S_GPIO_DIN GPIO_NUM_17  // 数据输入（麦克风）
+
+#define AUDIO_CODEC_PA_PIN GPIO_NUM_41                    // NS4150B功放使能引脚
+#define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR // ES8389默认I2C地址
+
+// UART串口配置（用于 AC7065E 蓝牙音频协处理器通信）
+#define AC7065E_UART_TX_PIN GPIO_NUM_43 // UART TX 引脚
+#define AC7065E_UART_RX_PIN GPIO_NUM_44 // UART RX 引脚
+#define AC7065E_UART_BAUD_RATE 115200   // 波特率
+
+#endif
