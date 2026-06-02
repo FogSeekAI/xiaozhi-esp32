@@ -23,7 +23,9 @@
 class FogSeekEdgeYingZhi : public WifiBoard {
 private:
     Button boot_button_;
-    Button ctrl_button_;
+    Button next_button_;
+    Button prev_button_;
+    Button led_switch_button_;
     FogSeekPowerManager power_manager_;
     FogSeekLedController led_controller_;
     AC7065ETransport ac7065e_transport_;
@@ -31,6 +33,8 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec* audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
+    RgbLedStrip* rgb_led_strip_ = nullptr;
+    bool rgb_led_on_ = false;
 
     // AUX 状态标记
     bool aux_inserted_ = false;
@@ -55,25 +59,58 @@ private:
 
     // 初始化按键回调
     void InitializeButtonCallbacks() {
-        ctrl_button_.OnClick([this]() {
+        // IO40_LED: 单击打断对话，双击配网，长按开关RGB灯
+        led_switch_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             app.ToggleChatState();  // 切换聊天状态（打断）
         });
-        ctrl_button_.OnDoubleClick([this]() {
+        led_switch_button_.OnDoubleClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
                 return;
             }
         });
-        ctrl_button_.OnLongPress([this]() {
-            // 切换电源状态
-            if (!power_manager_.IsPowerOn()) {
-                PowerOn();
+        led_switch_button_.OnLongPress([this]() {
+            if (rgb_led_strip_ == nullptr) {
+                ESP_LOGW(TAG, "RGB LED not initialized");
+                return;
+            }
+            rgb_led_on_ = !rgb_led_on_;
+            if (rgb_led_on_) {
+                rgb_led_strip_->SetAllColor({255, 255, 255});  // 白色
+                ESP_LOGI(TAG, "RGB LED ON");
             } else {
-                PowerOff();
+                rgb_led_strip_->SetAllColor({0, 0, 0});  // 关闭
+                ESP_LOGI(TAG, "RGB LED OFF");
             }
         });
+
+        // IO47_NEXT/V+: 单击下一首，长按增大音量
+        next_button_.OnClick([this]() {
+            ac7065e_transport_.SendNextTrack();
+            ESP_LOGI(TAG, "Next track");
+        });
+        next_button_.OnLongPress([this]() {
+            ac7065e_transport_.SendVolumeUp();
+            ESP_LOGI(TAG, "Volume up");
+        });
+
+        // IO39_PREV/V-: 单击上一首，长按减小音量
+        prev_button_.OnClick([this]() {
+            ac7065e_transport_.SendPrevTrack();
+            ESP_LOGI(TAG, "Previous track");
+        });
+        prev_button_.OnLongPress([this]() {
+            ac7065e_transport_.SendVolumeDown();
+            ESP_LOGI(TAG, "Volume down");
+        });
+    }
+
+    // 初始化 RGB LED（直接使用 RgbLedStrip，不需要红绿灯）
+    void InitializeLedController() {
+        rgb_led_strip_ = new RgbLedStrip(LED_RGB_GPIO, LED_RGB_NUM_LEDS);
+        ESP_LOGI(TAG, "RGB LED initialized on GPIO%d, %d LEDs", LED_RGB_GPIO, LED_RGB_NUM_LEDS);
     }
 
     // 初始化 AC7065E UART 通信
@@ -332,8 +369,13 @@ private:
     }
 
 public:
-    FogSeekEdgeYingZhi() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO) {
+    FogSeekEdgeYingZhi()
+        : boot_button_(BOOT_BUTTON_GPIO),
+          next_button_(NEXT_BUTTON_GPIO),
+          prev_button_(PREV_BUTTON_GPIO),
+          led_switch_button_(LED_SWITCH_GPIO) {
         InitializeI2c();
+        InitializeLedController();
         InitializeButtonCallbacks();
         InitializeAC7065EUart();
         InitializeTools();
@@ -349,6 +391,9 @@ public:
     }
 
     ~FogSeekEdgeYingZhi() {
+        if (rgb_led_strip_) {
+            delete rgb_led_strip_;
+        }
         if (i2c_bus_) {
             i2c_del_master_bus(i2c_bus_);
         }

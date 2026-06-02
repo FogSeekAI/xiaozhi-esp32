@@ -5,7 +5,13 @@
 
 // 按钮相关配置
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
-#define CTRL_BUTTON_GPIO GPIO_NUM_40
+#define LED_SWITCH_GPIO GPIO_NUM_40   // IO40_LED: 单击打断对话，双击配网，长按开关RGB灯
+#define NEXT_BUTTON_GPIO GPIO_NUM_47  // IO47_NEXT/V+: 单击下一首，长按增大音量
+#define PREV_BUTTON_GPIO GPIO_NUM_39  // IO39_PREV/V-: 单击上一首，长按减小音量
+
+// RGB LED 配置（直接使用 RgbLedStrip，不依赖 FogSeekLedController）
+#define LED_RGB_GPIO GPIO_NUM_38       // IO38: RGB 灯带控制引脚
+#define LED_RGB_NUM_LEDS 11            // RGB 灯珠数量
 
 // 音频相关配置
 #define AUDIO_INPUT_SAMPLE_RATE 24000
