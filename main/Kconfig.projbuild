@@ -237,8 +237,8 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO_DODOPET
         bool "Nano Dodopet"
         depends on IDF_TARGET_ESP32S3
-    config BOARD_TYPE_FOGSEEK_NANO_YINGZHI
-        bool "Nano Yingzhi"
+    config BOARD_TYPE_FOGSEEK_EDGE_YINGZHI
+        bool "Edge Yingzhi"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_LCD_EYES
         bool "Nano LCD Eyes"
@@ -928,8 +928,8 @@ config USE_DEVICE_AEC
         || BOARD_TYPE_FOGSEEK_NANO_DODOPET || BOARD_TYPE_FOGSEEK_NANO_WOODLIGHT || BOARD_TYPE_FOGSEEK_NANO_Angel \
         || BOARD_TYPE_FOGSEEK_EDGE_LINKBIT_LUMI|| BOARD_TYPE_FOGSEEK_DUAL_EYES\
         || BOARD_TYPE_FOGSEEK_EDGE || BOARD_TYPE_FOGSEEK_EDGE_LCD1_8 || BOARD_TYPE_FOGSEEK_EDGE_ESP15F \
-        ||BOARD_TYPE_FOGSEEK_DUAL_EYES_EXPAND \
-        || BOARD_TYPE_FOGSEEK_NANO_TOY )
+        || BOARD_TYPE_FOGSEEK_DUAL_EYES_EXPAND \
+        || BOARD_TYPE_FOGSEEK_NANO_TOY || BOARD_TYPE_FOGSEEK_EDGE_YINGZHI)
     help
         To work properly, device-side AEC requires a clean output reference path from the speaker signal and physical acoustic isolation between the microphone and speaker.
 
