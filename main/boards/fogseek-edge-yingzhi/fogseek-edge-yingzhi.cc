@@ -2,6 +2,7 @@
 #include <driver/i2c_master.h>
 #include <driver/rtc_io.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include "ac7065e_transport.h"
 #include "adc_battery_monitor.h"
 #include "application.h"
@@ -20,6 +21,11 @@
 
 #define TAG "FogSeekEdgeYingZhi"
 
+// 重发配置
+#define RETRY_INTERVAL_MS   500   // 重发间隔 (ms)
+#define RETRY_MAX_COUNT     3     // 最大重发次数
+#define ACK_TIMEOUT_MS      500  // 等待 ACK 超时时间 (ms)
+
 class FogSeekEdgeYingZhi : public WifiBoard {
 private:
     Button boot_button_;
@@ -33,11 +39,142 @@ private:
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec* audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
+    esp_timer_handle_t wake_word_check_timer_ = nullptr;
     RgbLedStrip* rgb_led_strip_ = nullptr;
     bool rgb_led_on_ = false;
 
     // AUX 状态标记
     bool aux_inserted_ = false;
+
+    // ---- 重发机制 ----
+    // 待确认命令结构
+    struct PendingCommand {
+        uint8_t cmd;
+        uint8_t data_len;
+        uint8_t data[8];  // 最多 8 字节数据
+        uint8_t retry_count;
+        esp_timer_handle_t retry_timer;
+        bool (*send_func)(AC7065ETransport*, uint8_t, const uint8_t*, uint8_t);
+    };
+    PendingCommand pending_cmd_;
+    bool has_pending_cmd_ = false;
+
+    // 上一次检测到唤醒词的设备状态，用于防抖
+    DeviceState last_wake_word_state_ = kDeviceStateUnknown;
+
+    // 发送命令并启动重发定时器
+    void SendCommandWithRetry(uint8_t cmd, const uint8_t* data = nullptr, uint8_t data_len = 0,
+                              bool (*send_func)(AC7065ETransport*, uint8_t, const uint8_t*, uint8_t) = nullptr) {
+        // 如果上一次命令还没收到 ACK，先取消旧的重发
+        CancelPendingRetry();
+
+        // 执行发送
+        bool sent = false;
+        if (send_func) {
+            sent = send_func(&ac7065e_transport_, cmd, data, data_len);
+        } else {
+            if (data_len == 0) {
+                sent = ac7065e_transport_.SendCommand(cmd);
+            } else if (data_len == 1) {
+                sent = ac7065e_transport_.SendCommand(cmd, data[0]);
+            } else {
+                sent = ac7065e_transport_.SendCommand(cmd, data, data_len);
+            }
+        }
+
+        if (!sent) {
+            ESP_LOGW(TAG, "Failed to send cmd=0x%02X, will retry", cmd);
+        }
+
+        // 保存待确认命令
+        pending_cmd_.cmd = cmd;
+        pending_cmd_.data_len = data_len;
+        if (data && data_len > 0 && data_len <= sizeof(pending_cmd_.data)) {
+            memcpy(pending_cmd_.data, data, data_len);
+        }
+        pending_cmd_.retry_count = 0;
+        pending_cmd_.send_func = send_func;
+        has_pending_cmd_ = true;
+
+        // 启动重发定时器
+        StartRetryTimer();
+    }
+
+    // 启动重发定时器
+    void StartRetryTimer() {
+        if (pending_cmd_.retry_timer) {
+            esp_timer_stop(pending_cmd_.retry_timer);
+            esp_timer_delete(pending_cmd_.retry_timer);
+            pending_cmd_.retry_timer = nullptr;
+        }
+
+        esp_timer_create_args_t timer_args = {};
+        timer_args.callback = [](void* arg) {
+            auto self = static_cast<FogSeekEdgeYingZhi*>(arg);
+            self->OnRetryTimer();
+        };
+        timer_args.arg = this;
+        timer_args.name = "ac7065e_retry";
+
+        esp_timer_create(&timer_args, &pending_cmd_.retry_timer);
+        esp_timer_start_once(pending_cmd_.retry_timer, RETRY_INTERVAL_MS * 1000);
+    }
+
+    // 重发定时器回调
+    void OnRetryTimer() {
+        if (!has_pending_cmd_) return;
+
+        pending_cmd_.retry_count++;
+        ESP_LOGW(TAG, "Retry #%d for cmd=0x%02X", pending_cmd_.retry_count, pending_cmd_.cmd);
+
+        bool sent = false;
+        if (pending_cmd_.send_func) {
+            sent = pending_cmd_.send_func(&ac7065e_transport_, pending_cmd_.cmd,
+                                          pending_cmd_.data, pending_cmd_.data_len);
+        } else {
+            if (pending_cmd_.data_len == 0) {
+                sent = ac7065e_transport_.SendCommand(pending_cmd_.cmd);
+            } else if (pending_cmd_.data_len == 1) {
+                sent = ac7065e_transport_.SendCommand(pending_cmd_.cmd, pending_cmd_.data[0]);
+            } else {
+                sent = ac7065e_transport_.SendCommand(pending_cmd_.cmd,
+                                                      pending_cmd_.data, pending_cmd_.data_len);
+            }
+        }
+
+        if (pending_cmd_.retry_count < RETRY_MAX_COUNT) {
+            // 还有重试次数，继续等待
+            StartRetryTimer();
+        } else {
+            // 超过最大重试次数，放弃
+            ESP_LOGE(TAG, "Max retries reached for cmd=0x%02X, giving up", pending_cmd_.cmd);
+            CancelPendingRetry();
+        }
+    }
+
+    // 处理收到的 ACK
+    void HandleAck(uint8_t acked_cmd) {
+        if (has_pending_cmd_ && pending_cmd_.cmd == acked_cmd) {
+            ESP_LOGI(TAG, "ACK received for cmd=0x%02X, retry cleared", acked_cmd);
+            CancelPendingRetry();
+        }
+    }
+
+    // 取消待确认命令和定时器
+    void CancelPendingRetry() {
+        if (pending_cmd_.retry_timer) {
+            esp_timer_stop(pending_cmd_.retry_timer);
+            esp_timer_delete(pending_cmd_.retry_timer);
+            pending_cmd_.retry_timer = nullptr;
+        }
+        has_pending_cmd_ = false;
+    }
+
+    // 唤醒词检测回调：设备状态变为 kDeviceStateConnecting 时发送唤醒指令
+    void OnWakeWordTriggered() {
+        ESP_LOGI(TAG, "Wake word detected! Sending WAKEUP to AC7065E...");
+        SendCommandWithRetry(CMD_WAKEUP);
+    }
 
     // 初始化I2C外设
     void InitializeI2c() {
@@ -88,21 +225,21 @@ private:
 
         // IO47_NEXT/V+: 单击下一首，长按增大音量
         next_button_.OnClick([this]() {
-            ac7065e_transport_.SendNextTrack();
+            SendCommandWithRetry(CMD_NEXT_TRACK);
             ESP_LOGI(TAG, "Next track");
         });
         next_button_.OnLongPress([this]() {
-            ac7065e_transport_.SendVolumeUp();
+            SendCommandWithRetry(CMD_VOL_UP);
             ESP_LOGI(TAG, "Volume up");
         });
 
         // IO39_PREV/V-: 单击上一首，长按减小音量
         prev_button_.OnClick([this]() {
-            ac7065e_transport_.SendPrevTrack();
+            SendCommandWithRetry(CMD_PREV_TRACK);
             ESP_LOGI(TAG, "Previous track");
         });
         prev_button_.OnLongPress([this]() {
-            ac7065e_transport_.SendVolumeDown();
+            SendCommandWithRetry(CMD_VOL_DOWN);
             ESP_LOGI(TAG, "Volume down");
         });
     }
@@ -127,6 +264,38 @@ private:
         ac7065e_transport_.StartReceiveTask([this](uint8_t cmd, const uint8_t* data, uint8_t len) {
             HandleAC7065EMessage(cmd, data, len);
         });
+
+        // 启动唤醒词检测定时器 (每 200ms 检查一次设备状态变化)
+        StartWakeWordCheckTimer();
+    }
+
+    // 启动唤醒词检测定时器
+    void StartWakeWordCheckTimer() {
+        esp_timer_create_args_t timer_args = {};
+        timer_args.callback = [](void* arg) {
+            auto self = static_cast<FogSeekEdgeYingZhi*>(arg);
+            self->CheckWakeWordState();
+        };
+        timer_args.arg = this;
+        timer_args.name = "wake_word_check";
+        esp_timer_create(&timer_args, &wake_word_check_timer_);
+        esp_timer_start_periodic(wake_word_check_timer_, 200000);  // 200ms
+    }
+
+    // 周期性检查唤醒词触发状态
+    void CheckWakeWordState() {
+        auto& app = Application::GetInstance();
+        auto state = app.GetDeviceState();
+
+        // 检测状态从 Idle/Unknown 变为 Connecting/Listening (唤醒词触发)
+        if ((last_wake_word_state_ == kDeviceStateIdle || last_wake_word_state_ == kDeviceStateUnknown) &&
+            (state == kDeviceStateConnecting || state == kDeviceStateListening)) {
+            ESP_LOGI(TAG, "Wake word triggered! state: %d -> %d, sending WAKEUP",
+                     (int)last_wake_word_state_, (int)state);
+            SendCommandWithRetry(CMD_WAKEUP);
+        }
+
+        last_wake_word_state_ = state;
     }
 
     // 处理 AC7065E 上报消息
@@ -156,6 +325,7 @@ private:
             case CMD_CMD_ACK:  // 0x83 - 确认应答
                 if (len >= 1) {
                     ESP_LOGI(TAG, "AC7065E ACK for cmd: 0x%02X", data[0]);
+                    HandleAck(data[0]);
                 }
                 break;
 
@@ -207,64 +377,64 @@ private:
 
         // ---- 唤醒/休眠控制 ----
 
-        mcp_server.AddTool("self.ac7065e.wakeup", "使 AC7065E 蓝牙音频协处理器进入 AI 语音对话模式",
+        mcp_server.AddTool("self.ac7065e.wakeup", "使 AC7065E 蓝牙音频协处理器进入 AI 语音对话模式，对话模式同样保持蓝牙音乐播放",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendWakeUp();
-                               ESP_LOGI(TAG, "MCP: WAKEUP -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_WAKEUP);
+                               ESP_LOGI(TAG, "MCP: WAKEUP -> OK");
+                               return true;
                            });
 
-        mcp_server.AddTool("self.ac7065e.sleep", "关闭 AI 语音对话模式，切换回蓝牙模式",
+        mcp_server.AddTool("self.ac7065e.sleep", "关闭 AI 语音对话模式，切换回蓝牙模式，蓝牙模式同样可以进行指令下发，当用户说退下/再见以及长时间无对话时，在进入待命状态前先切换到蓝牙模式再进入待命",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendSleep();
-                               ESP_LOGI(TAG, "MCP: SLEEP -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_SLEEP);
+                               ESP_LOGI(TAG, "MCP: SLEEP -> OK");
+                               return true;
                            });
 
         // ---- 音源切换 ----
 
         mcp_server.AddTool("self.ac7065e.play", "恢复蓝牙音乐播放", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendPlay();
-                               ESP_LOGI(TAG, "MCP: PLAY -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_PLAY);
+                               ESP_LOGI(TAG, "MCP: PLAY -> OK");
+                               return true;
                            });
 
         mcp_server.AddTool("self.ac7065e.pause", "暂停蓝牙音乐", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendPause();
-                               ESP_LOGI(TAG, "MCP: PAUSE -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_PAUSE);
+                               ESP_LOGI(TAG, "MCP: PAUSE -> OK");
+                               return true;
                            });
 
         mcp_server.AddTool("self.ac7065e.next_track", "切换到下一曲", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendNextTrack();
-                               ESP_LOGI(TAG, "MCP: NEXT_TRACK -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_NEXT_TRACK);
+                               ESP_LOGI(TAG, "MCP: NEXT_TRACK -> OK");
+                               return true;
                            });
 
         mcp_server.AddTool("self.ac7065e.prev_track", "切换到上一曲", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendPrevTrack();
-                               ESP_LOGI(TAG, "MCP: PREV_TRACK -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_PREV_TRACK);
+                               ESP_LOGI(TAG, "MCP: PREV_TRACK -> OK");
+                               return true;
                            });
 
         // ---- 音量控制 ----
 
         mcp_server.AddTool("self.ac7065e.volume_up", "音量加", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendVolumeUp();
-                               ESP_LOGI(TAG, "MCP: VOL_UP -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_VOL_UP);
+                               ESP_LOGI(TAG, "MCP: VOL_UP -> OK");
+                               return true;
                            });
 
         mcp_server.AddTool("self.ac7065e.volume_down", "音量减", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendVolumeDown();
-                               ESP_LOGI(TAG, "MCP: VOL_DOWN -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_VOL_DOWN);
+                               ESP_LOGI(TAG, "MCP: VOL_DOWN -> OK");
+                               return true;
                            });
 
         mcp_server.AddTool(
@@ -278,41 +448,40 @@ private:
                     level = 0;
                 if (level > 100)
                     level = 100;
-                bool ok = ac7065e_transport_.SendVolumeDefault(static_cast<uint8_t>(level));
-                ESP_LOGI(TAG, "MCP: VOL_DEFAULT(%d) -> %s", level, ok ? "OK" : "FAIL");
-                return ok;
+                uint8_t vol = static_cast<uint8_t>(level);
+                SendCommandWithRetry(CMD_VOL_DEFAULT, &vol, 1);
+                ESP_LOGI(TAG, "MCP: VOL_DEFAULT(%d) -> OK", level);
+                return true;
             });
 
         mcp_server.AddTool("self.ac7065e.volume_max", "设置为最大音量", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendVolumeMax();
-                               ESP_LOGI(TAG, "MCP: VOL_MAX -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_VOL_MAX);
+                               ESP_LOGI(TAG, "MCP: VOL_MAX -> OK");
+                               return true;
                            });
 
         mcp_server.AddTool("self.ac7065e.volume_min", "设置为最小音量（或静音）", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendVolumeMin();
-                               ESP_LOGI(TAG, "MCP: VOL_MIN -> %s", ok ? "OK" : "FAIL");
-                               return ok;
+                               SendCommandWithRetry(CMD_VOL_MIN);
+                               ESP_LOGI(TAG, "MCP: VOL_MIN -> OK");
+                               return true;
                            });
 
         // ---- 查询命令 ----
 
         mcp_server.AddTool("self.ac7065e.get_battery", "查询 AC7065E 蓝牙模块电量", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendGetBattery();
-                               ESP_LOGI(TAG, "MCP: GET_BATTERY -> %s", ok ? "OK" : "FAIL");
-                               // 实际电量值通过 AC7065E 异步上报 (CMD_BATTERY_RESP)
-                               return ok;
+                               SendCommandWithRetry(CMD_GET_BATTERY);
+                               ESP_LOGI(TAG, "MCP: GET_BATTERY -> OK");
+                               return true;
                            });
 
         mcp_server.AddTool("self.ac7065e.get_volume", "查询 AC7065E 蓝牙模块当前音量",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
-                               bool ok = ac7065e_transport_.SendGetVolume();
-                               ESP_LOGI(TAG, "MCP: GET_VOL -> %s", ok ? "OK" : "FAIL");
-                               // 实际音量值通过 AC7065E 异步上报 (CMD_VOL_RESP)
-                               return ok;
+                               SendCommandWithRetry(CMD_GET_VOL);
+                               ESP_LOGI(TAG, "MCP: GET_VOL -> OK");
+                               return true;
                            });
 
         ESP_LOGI(TAG, "AC7065E MCP tools registered");
@@ -350,7 +519,7 @@ private:
     // 开机流程
     void PowerOn() {
         // 通知 AC7065E 进入AI语音对话模式
-        ac7065e_transport_.SendWakeUp();
+        SendCommandWithRetry(CMD_WAKEUP);
 
         ESP_LOGI(TAG, "Device powered on.");
 
@@ -360,7 +529,7 @@ private:
     // 关机流程
     void PowerOff() {
         // 通知 AC7065E 切换到蓝牙模式
-        ac7065e_transport_.SendSleep();
+        SendCommandWithRetry(CMD_SLEEP);
 
         Application::GetInstance().SetDeviceState(
             DeviceState::kDeviceStateIdle);  // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
@@ -391,6 +560,12 @@ public:
     }
 
     ~FogSeekEdgeYingZhi() {
+        CancelPendingRetry();
+        if (wake_word_check_timer_) {
+            esp_timer_stop(wake_word_check_timer_);
+            esp_timer_delete(wake_word_check_timer_);
+            wake_word_check_timer_ = nullptr;
+        }
         if (rgb_led_strip_) {
             delete rgb_led_strip_;
         }
