@@ -548,6 +548,12 @@ static const lcd_config_item_t jyc_0_71_config = {
     .driver_type = DRIVER_GC9D01,
     .init_cmds = NULL, // 使用标准库默认初始化
     .init_cmds_size = 0};
+
+static const lcd_config_item_t nano_2_4_config = {
+    .comm_type = COMM_SPI,
+    .driver_type = DRIVER_ST7789,
+    .init_cmds = NULL, // 使用标准库默认初始化
+    .init_cmds_size = 0};
 // 通信接口和驱动接口的实现类定义
 class SpiCommInterface : public ICommInterface
 {
@@ -662,6 +668,15 @@ public:
             // ST7789使用标准初始化，这里跳过自定义命令
         }
 
+        // 复位面板
+        ret = esp_lcd_panel_reset(*panel);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Panel reset failed");
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+
         // 初始化面板
         ret = esp_lcd_panel_init(*panel);
         if (ret != ESP_OK)
@@ -670,17 +685,33 @@ public:
             return false;
         }
 
-        // 设置旋转方向（如果需要）
-        ret = esp_lcd_panel_swap_xy(*panel, false);
+        // ST7789 通常需要颜色反转
+        ret = esp_lcd_panel_invert_color(*panel, true);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Invert color failed");
+            return false;
+        }
+
+        // 设置旋转方向
+        ret = esp_lcd_panel_swap_xy(*panel, pin_config->swap_xy);
         if (ret != ESP_OK)
         {
             ESP_LOGE(TAG, "Swap XY failed");
             return false;
         }
-        ret = esp_lcd_panel_mirror(*panel, true, false);
+        ret = esp_lcd_panel_mirror(*panel, pin_config->mirror_x, pin_config->mirror_y);
         if (ret != ESP_OK)
         {
             ESP_LOGE(TAG, "Mirror failed");
+            return false;
+        }
+
+        // 开启显示
+        ret = esp_lcd_panel_disp_on_off(*panel, true);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Enable display failed");
             return false;
         }
 
@@ -830,7 +861,9 @@ const lcd_config_item_t *FogSeekDisplayManager::GetLcdConfig(lcd_type_t lcd_type
     case DISPLAY_TYPE_HXC_1_15_INCH:
         return &hxc_1_15_config;
     case DISPLAY_TYPE_JYC_0_71_INCH:
-        return &jyc_0_71_config;    
+        return &jyc_0_71_config;
+    case DISPLAY_TYPE_NANO_2_4_INCH:
+        return &nano_2_4_config;    
     default:
         ESP_LOGE(TAG, "Unsupported LCD type: %d", lcd_type);
         return nullptr;
@@ -932,13 +965,20 @@ void FogSeekDisplayManager::Initialize(lcd_type_t lcd_type, const lcd_pin_config
 
 bool FogSeekDisplayManager::InitializeComponents(const lcd_pin_config_t *pin_config)
 {
-    // 9. 初始化背光
-    backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->spi_bl_gpio, true);
-    if (backlight_)
+    // 9. 初始化背光（如果BL引脚为NC则跳过，由硬件电路控制）
+    if (pin_config->spi_bl_gpio >= 0)
     {
-        backlight_->SetBrightness(0);
+        backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->spi_bl_gpio, true);
+        if (backlight_)
+        {
+            backlight_->SetBrightness(0);
+        }
+        SetBrightness(100);
     }
-    SetBrightness(100);
+    else
+    {
+        ESP_LOGI(TAG, "Backlight is hardware-controlled, skipping software backlight init");
+    }
     // 10. 创建SPI LCD显示对象
     display_ = new (std::nothrow) SpiLcdDisplay(
         panel_io_,
