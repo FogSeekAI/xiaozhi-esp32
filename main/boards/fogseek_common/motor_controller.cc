@@ -18,9 +18,11 @@ FogSeekMotorController::FogSeekMotorController() : servo_gpio_(GPIO_NUM_NC),
 
 FogSeekMotorController::~FogSeekMotorController()
 {
-    if (initialized_)
-    {
-        ledc_stop(LEDC_LOW_SPEED_MODE, channel_, 0);
+    // 停止所有舵机
+    for (auto& pair : servos_) {
+        if (pair.second.initialized) {
+            ledc_stop(LEDC_LOW_SPEED_MODE, pair.second.channel, 0);
+        }
     }
     
     if (motor_timer_handle_ != nullptr) {
@@ -28,30 +30,54 @@ FogSeekMotorController::~FogSeekMotorController()
     }
 }
 
-void FogSeekMotorController::InitializeServo(gpio_num_t servo_gpio)
+void FogSeekMotorController::InitializeServo(ServoId id, gpio_num_t servo_gpio)
 {
-    servo_gpio_ = servo_gpio;
+    InitializeServo(id, servo_gpio, 205, 1024);
+}
 
-    // 配置LEDC定时器
-    ledc_timer_config_t ledc_timer = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_13_BIT, // 13位分辨率
-        .timer_num = timer_,
-        .freq_hz = 50, // 50Hz PWM频率，周期20ms
-        .clk_cfg = LEDC_AUTO_CLK};
-    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-
+void FogSeekMotorController::InitializeServo(ServoId id, gpio_num_t servo_gpio, uint32_t min_duty, uint32_t max_duty)
+{
+    if (id >= SERVO_MAX) {
+        ESP_LOGE(TAG, "Invalid servo ID: %d", id);
+        return;
+    }
+    
+    // 如果定时器未初始化，先初始化定时器
+    if (!timer_initialized_) {
+        ledc_timer_config_t ledc_timer = {
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .duty_resolution = LEDC_TIMER_13_BIT,
+            .timer_num = timer_,
+            .freq_hz = 50,
+            .clk_cfg = LEDC_AUTO_CLK
+        };
+        ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
+        timer_initialized_ = true;
+        ESP_LOGI(TAG, "LEDC timer initialized");
+    }
+    
+    // 配置舵机
+    ServoConfig& config = servos_[id];
+    config.gpio = servo_gpio;
+    config.channel = (ledc_channel_t)(LEDC_CHANNEL_0 + id);
+    config.min_duty = min_duty;
+    config.max_duty = max_duty;
+    config.current_angle = 90;
+    
     // 配置LEDC通道
     ledc_channel_config_t ledc_channel = {
-        .gpio_num = servo_gpio_,
+        .gpio_num = config.gpio,
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = channel_,
+        .channel = config.channel,
         .intr_type = LEDC_INTR_DISABLE,
         .timer_sel = timer_,
         .duty = 0,
-        .hpoint = 0};
+        .hpoint = 0
+    };
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
-
+    
+    config.initialized = true;
+    
     // 设置初始角度
     SetAngle(current_angle_);
     initialized_ = true;
@@ -61,32 +87,47 @@ void FogSeekMotorController::InitializeServo(gpio_num_t servo_gpio)
 
 void FogSeekMotorController::SetAngle(uint16_t angle)
 {
-    if (!initialized_)
-    {
-        ESP_LOGE(TAG, "Servo controller not initialized");
+    if (id >= SERVO_MAX) {
+        ESP_LOGE(TAG, "Invalid servo ID: %d", id);
         return;
     }
+    
+    auto it = servos_.find(id);
+    if (it == servos_.end() || !it->second.initialized) {
+        ESP_LOGE(TAG, "Servo %d not initialized", id);
+        return;
+    }
+    
+    ServoConfig& config = it->second;
 
     // 限制角度范围
-    if (angle > 180)
-    {
+    if (angle > 180) {
         angle = 180;
     }
 
-    current_angle_ = angle;
+    config.current_angle = angle;
 
-    // 计算PWM占空比
-    // 通常舵机的控制脉冲范围是500-2500微秒，对应0-180度
-    // 对应LEDC的duty值约为262-1310 (基于13位分辨率和20ms周期)
-    uint32_t duty = (uint32_t)(((angle / 180.0) * (1310 - 262)) + 262);
+    // 计算PWM占空比 - 线性插值
+    uint32_t duty = (uint32_t)(config.min_duty + ((float)angle / 180.0f) * (config.max_duty - config.min_duty));
 
-    ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, channel_, duty));
-    ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, channel_));
+    ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, config.channel, duty));
+    ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, config.channel));
+    
+    ESP_LOGD(TAG, "Servo %d set to %d° (duty: %lu)", id, angle, duty);
 }
 
 uint16_t FogSeekMotorController::GetAngle() const
 {
-    return current_angle_;
+    if (id >= SERVO_MAX) {
+        return 0;
+    }
+    
+    auto it = servos_.find(id);
+    if (it == servos_.end()) {
+        return 0;
+    }
+    
+    return it->second.current_angle;
 }
 
 void FogSeekMotorController::InitializeMotor(gpio_num_t motor_gpio)

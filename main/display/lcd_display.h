@@ -38,6 +38,7 @@ protected:
 
     void InitializeLcdThemes();
     void SetupUI();
+    void SetupEyesUI(lv_display_t * display_ );
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;
 
@@ -51,9 +52,11 @@ public:
     virtual void SetChatMessage(const char* role, const char* content) override; 
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
 
+    esp_lcd_panel_handle_t GetPanelHandle() const { return panel_; }
+
+
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;
-    
     // Set whether to hide chat messages/subtitles
     void SetHideSubtitle(bool hide);
 };

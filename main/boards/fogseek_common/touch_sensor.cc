@@ -4,35 +4,96 @@
 
 #define TAG "TouchSensor"
 
+struct InterruptContext {
+    EventGroupHandle_t event_group;
+    EventBits_t press_bit;
+    EventBits_t release_bit;
+};
+
+static InterruptContext* g_interrupt_context = nullptr;
+
+static void IRAM_ATTR gpio_touch_isr_handler(void* arg)
+{
+    InterruptContext* ctx = static_cast<InterruptContext*>(arg);
+    if (ctx == nullptr || ctx->event_group == nullptr) {
+        return;
+    }
+    
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    int level = gpio_get_level(g_interrupt_context != nullptr ? 
+                               ((TouchSensor*)g_interrupt_context)->GetGpioPin() : GPIO_NUM_NC);
+    
+    if (level == 1) {
+        if (ctx->press_bit != 0) {
+            xEventGroupSetBitsFromISR(ctx->event_group, ctx->press_bit, &xHigherPriorityTaskWoken);
+        }
+    } else {
+        if (ctx->release_bit != 0) {
+            xEventGroupSetBitsFromISR(ctx->event_group, ctx->release_bit, &xHigherPriorityTaskWoken);
+        }
+    }
+    
+    if (xHigherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
+    }
+}
+
 TouchSensor::TouchSensor() {}
 
 TouchSensor::~TouchSensor()
 {
+    if (interrupt_enabled_ && gpio_pin_ != GPIO_NUM_NC) {
+        gpio_isr_handler_remove(gpio_pin_);
+    }
+    
     if (is_cap_touch_)
     {
         touch_pad_fsm_stop();
         touch_pad_deinit();
     }
+    
+    if (g_interrupt_context != nullptr) {
+        delete g_interrupt_context;
+        g_interrupt_context = nullptr;
+    }
 }
 
-void TouchSensor::InitializeGpioTouch(gpio_num_t gpio_pin)
+void TouchSensor::InitializeGpioTouch(gpio_num_t gpio_pin, bool enable_interrupt, EventGroupHandle_t event_group, EventBits_t press_bit, EventBits_t release_bit)
 {
     gpio_pin_ = gpio_pin;
     is_cap_touch_ = false;
+    interrupt_enabled_ = enable_interrupt;
+    event_group_ = event_group;
+    press_event_bit_ = press_bit;
+    release_event_bit_ = release_bit;
     
     gpio_config_t io_conf = {};
     io_conf.pin_bit_mask = (1ULL << gpio_pin_);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
-    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.intr_type = enable_interrupt ? GPIO_INTR_ANYEDGE : GPIO_INTR_DISABLE;
     gpio_config(&io_conf);
     
     vTaskDelay(pdMS_TO_TICKS(50));
-     gpio_idle_level_ = 0;  // 空闲状态固定为低电平（0）
+    gpio_idle_level_ = 0;
     
-    ESP_LOGI(TAG, "GPIO%d touch sensor initialized, idle level: %d", 
-             gpio_pin_, gpio_idle_level_);
+    if (enable_interrupt) {
+        if (g_interrupt_context == nullptr) {
+            g_interrupt_context = new InterruptContext();
+        }
+        g_interrupt_context->event_group = event_group;
+        g_interrupt_context->press_bit = press_bit;
+        g_interrupt_context->release_bit = release_bit;
+        
+        gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+        gpio_isr_handler_add(gpio_pin_, gpio_touch_isr_handler, g_interrupt_context);
+        
+        ESP_LOGI(TAG, "GPIO%d touch sensor initialized with interrupt support", gpio_pin_);
+    } else {
+        ESP_LOGI(TAG, "GPIO%d touch sensor initialized (polling mode), idle level: %d", 
+                 gpio_pin_, gpio_idle_level_);
+    }
 }
 
 void TouchSensor::InitializeCapTouch(touch_pad_t touch_channel, float threshold_percent)
@@ -94,6 +155,7 @@ int TouchSensor::GetGpioLevel() const
     }
     return gpio_get_level(gpio_pin_);
 }
+
 uint32_t TouchSensor::ReadCapTouchValue()
 {
     if (!is_cap_touch_)
@@ -121,4 +183,14 @@ bool TouchSensor::IsCapTouchDetected()
 void TouchSensor::SetTouchCallback(TouchCallback callback)
 {
     callback_ = callback;
+}
+
+void TouchSensor::SetPressedCallback(TouchEventCallback callback)
+{
+    pressed_callback_ = callback;
+}
+
+void TouchSensor::SetReleasedCallback(TouchEventCallback callback)
+{
+    released_callback_ = callback;
 }

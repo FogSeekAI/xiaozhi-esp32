@@ -4,6 +4,29 @@
 #include <driver/gpio.h>
 #include <driver/ledc.h>
 #include <esp_timer.h>
+#include <map>
+#include <string>
+
+enum ServoId {
+    SERVO_ID_1 = 0,  // 第一个舵机（例如：IO3）
+    SERVO_ID_2 = 1,  // 第二个舵机（例如：IO39）
+    SERVO_MAX
+};
+
+struct ServoConfig {
+    gpio_num_t gpio;
+    ledc_channel_t channel;
+    uint16_t current_angle;
+    bool initialized;
+    
+    // 校准参数
+    uint32_t min_duty;  // 0度对应的duty值
+    uint32_t max_duty;  // 180度对应的duty值
+    
+    ServoConfig() : gpio(GPIO_NUM_NC), channel(LEDC_CHANNEL_0), 
+                    current_angle(90), initialized(false),
+                    min_duty(205), max_duty(1024) {}
+};
 
 class FogSeekMotorController
 {
@@ -12,8 +35,11 @@ public:
     ~FogSeekMotorController();
 
     // 舵机控制相关方法
-    // 初始化舵机控制器
-    void InitializeServo(gpio_num_t servo_gpio);
+    // 初始化指定ID的舵机
+    void InitializeServo(ServoId id, gpio_num_t servo_gpio);
+    
+    // 初始化指定ID的舵机，带校准参数
+    void InitializeServo(ServoId id, gpio_num_t servo_gpio, uint32_t min_duty, uint32_t max_duty);
 
     // 设置舵机角度 (0-180度)
     void SetAngle(uint16_t angle);
@@ -23,7 +49,7 @@ public:
 
     // 电机控制相关方法
     // 初始化电机控制器
-    void InitializeIOMotor(gpio_num_t motor_gpio);
+    void InitializeMotor(gpio_num_t motor_gpio);
 
     // 直接控制电机状态
     void ControlMotor(bool state);
@@ -37,11 +63,9 @@ public:
 
 private:
     // 舵机相关属性
-    gpio_num_t servo_gpio_;
-    ledc_channel_t channel_;
+    std::map<ServoId, ServoConfig> servos_;
     ledc_timer_t timer_;
-    uint16_t current_angle_;
-    bool initialized_;
+    bool timer_initialized_;
 
     // 电机相关属性
     gpio_num_t motor_gpio_;
@@ -50,11 +74,6 @@ private:
 
     // 用于存储定时参数
     uint32_t run_time_ms_;
-
-    // PWM 配置
-    bool pwm_initialized_ = false;
-    bool motor_enabled_ = false;    // 电机开关状态
-    uint32_t motor_duty_cycle_ = 0; // 当前占空比（0-4095）
 };
 
 #endif // _MOTOR_CONTROLLER_H_

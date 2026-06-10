@@ -4,6 +4,8 @@
 #include "tca6408a_interrupt_manager.h"
 #include "tca6408a_button.h"
 #include "tca6408a_power_manager.h"
+#include "tca6408a_led_controller.h"
+#include "tca6408a_led.h"
 #include "codecs/box_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
@@ -11,27 +13,90 @@
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
-#include "esp32_camera.h"
-#include <esp_video_init.h>
+#include "esp_video.h"
+#include "gc2145_camera_driver.h"
+#include "esp_lcd_panel_io_spi_expander.h"
+#include "display/lcd_display.h"
+#include "display/emote_display.h"
+#include "mcp_server.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
+#include <esp_heap_caps.h>
 #include <driver/gpio.h>
+#include <driver/spi_master.h>
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_ili9342.h"
+#include "display/lcd_display.h"
+#include "display/emote_display.h"
+#include "display/lvgl_display/lvgl_image.h"
+#include "mcp_server.h"
+#include <esp_lvgl_port.h>
+#include <lvgl.h>
+#include <freertos/task.h>
+#include <cstring>
+#include <sstream>
+#include <thread>
+#include <stdexcept>
+#include <driver/i2s_std.h>
+#include "motor_controller.h"
 
-#define TAG "FogSeekEdgeCameraCamera"
+
+
+
+#define TAG "FogSeekEdgeCamera"
+
+
 
 class FogSeekEdgeCamera : public WifiBoard
 {
 private:
     Button boot_button_;
     tca6408a_handle_t tca6408a_handle_;
-    TCA6408AInterruptManager *interrupt_manager_;
-    TCA6408AButton *ctrl_button_;
-    TCA6408APowerManager *power_manager_;
+    tca6408a_handle_t tca6408a_second_handle_;
+    spi_device_handle_t spi_lcd_ = nullptr;
+
+    Tca6408aInterruptManager interrupt_manager_;
+    Tca6408aButton ctrl_button_;
+    Tca6408aPowerManager power_manager_;
+    Tca6408aLedController led_controller_;
+    Tca6408aLed *test_led_ = nullptr;
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
-    Esp32Camera* camera_ = nullptr;
     esp_timer_handle_t button_monitor_timer_ = nullptr;
+    EspVideo* camera_ = nullptr;
+    Gc2145Camera* gc2145_camera_ = nullptr;
+    Display* display_ = nullptr;
+    esp_lcd_panel_io_handle_t lcd_io_ = nullptr;
+    esp_lcd_panel_handle_t lcd_panel_ = nullptr;
+    esp_lcd_panel_handle_t panel_handle = NULL;
+    FogSeekMotorController motor_controller_;
+
+    bool camera_initialized_ = false;
+
+
+
+    class Tca6408aBacklight : public Backlight {
+    private:
+        tca6408a_handle_t* tca_handle_;
+        tca6408a_gpio_t backlight_pin_;
+        
+    public:
+        Tca6408aBacklight(tca6408a_handle_t* handle, tca6408a_gpio_t pin) 
+            : tca_handle_(handle), backlight_pin_(pin) {
+        }
+        
+        void SetBrightnessImpl(uint8_t brightness) override {
+            if (tca_handle_) {
+                uint8_t level = (brightness > 0) ? 1 : 0;
+                ESP_LOGI(TAG, "Setting backlight: brightness=%d, level=%d", brightness, level);
+                
+                tca6408a_set_gpio_level(tca_handle_, backlight_pin_, level);
+            }
+        }
+    };
 
     void InitializeI2c()
     {
@@ -50,6 +115,18 @@ private:
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
     }
 
+
+    void InitializeSpi() {
+        spi_bus_config_t buscfg = {};
+        buscfg.mosi_io_num = SPI_PIN_NUM_LCD_MOSI;
+        buscfg.miso_io_num = GPIO_NUM_NC;
+        buscfg.sclk_io_num = SPI_PIN_NUM_LCD_SCLK;
+        buscfg.quadwp_io_num = GPIO_NUM_NC;
+        buscfg.quadhd_io_num = GPIO_NUM_NC;
+        buscfg.max_transfer_sz = DISPLAY_WIDTH * (DISPLAY_HEIGHT / 2) * sizeof(uint16_t);
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    }
+
     void InitializeTca6408a()
     {
         tca6408a_config_t tca6408a_config = {
@@ -61,11 +138,10 @@ private:
         esp_err_t ret = tca6408a_init(&tca6408a_handle_, &tca6408a_config);
         if (ret != ESP_OK)
         {
-            ESP_LOGE(TAG, "Failed to initialize TCA6408A");
+            ESP_LOGE(TAG, "Failed to initialize Tca6408a (0x20)");
             return;
         }
 
-        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_QSPI_PIN_NUM_LCD_BL, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, TCA6408A_DIR_OUTPUT);
@@ -73,63 +149,103 @@ private:
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGE_DONE_GPIO, TCA6408A_DIR_INPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_PWR_CHARGING_GPIO, TCA6408A_DIR_INPUT);
+        
+        ESP_LOGI(TAG, "Tca6408a (0x20) initialized successfully");
+        
+        tca6408a_config_t tca6408a_second_config = {
+            .i2c_bus = i2c_bus_,
+            .i2c_address = TCA6408A_SECOND_ADDR,
+            .int_gpio = GPIO_NUM_NC,
+            .reset_gpio = GPIO_NUM_NC};
 
-        ESP_LOGI(TAG, "TCA6408A initialized successfully");
+        ret = tca6408a_init(&tca6408a_second_handle_, &tca6408a_second_config);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to initialize Tca6408a second chip (0x21)");
+            return;
+        }
+
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, TCA6408A_DIR_OUTPUT);
+        tca6408a_set_gpio_direction(&tca6408a_second_handle_, TCA6408A_SECOND_CAM_PWDN_GPIO, TCA6408A_DIR_OUTPUT);
+        // 关键修复：立即设置 CS 为高电平（禁用状态），避免悬空
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, 1);
+        // 关闭背光
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, 0);
+        // 使能 VBAT
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, 1);
+        
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_CAM_PWDN_GPIO, 0);
+       
+        ESP_LOGI(TAG, "Tca6408a second chip (0x21) initialized successfully");
     }
 
     void InitializeInterruptManager()
     {
-        interrupt_manager_ = new TCA6408AInterruptManager(&tca6408a_handle_, I2C_INT_GPIO);
-        interrupt_manager_->Initialize();
-
+        interrupt_manager_.Initialize(&tca6408a_handle_, I2C_INT_GPIO);
         ESP_LOGI(TAG, "Interrupt manager initialized on GPIO%d", I2C_INT_GPIO);
     }
 
     void InitializePowerManager()
     {
-        TCA6408APowerManager::power_pin_config_t power_config = {
+        Tca6408aPowerManager::power_pin_config_t power_config = {
             .hold_gpio = TCA6408A_PWR_HOLD_GPIO,
             .charging_gpio = TCA6408A_PWR_CHARGING_GPIO,
             .charge_done_gpio = TCA6408A_PWR_CHARGE_DONE_GPIO,
             .adc_gpio = BATTERY_ADC_GPIO};
 
-        power_manager_ = new TCA6408APowerManager();
-        power_manager_->Initialize(&tca6408a_handle_, &power_config);
-        ESP_LOGI(TAG, "TCA6408A Power Manager initialized");
+        power_manager_.Initialize(&tca6408a_handle_, &power_config);
+        ESP_LOGI(TAG, "Tca6408a Power Manager initialized");
+    }
+
+    void InitializeLedController()
+    {
+        tca6408a_led_pin_config_t led_config = {
+            .red_gpio = TCA6408A_LED_RED_GPIO,
+            .green_gpio = TCA6408A_LED_GREEN_GPIO};
+
+        led_controller_.InitializeLeds(&tca6408a_handle_, &led_config, power_manager_);
+        ESP_LOGI(TAG, "TCA6408A LED controller initialized");
     }
 
     void InitializeCtrlButton()
     {
-        ctrl_button_ = new TCA6408AButton(&tca6408a_handle_, TCA6408A_CTRL_BUTTON_GPIO, true);
-        ctrl_button_->Initialize(interrupt_manager_);
+        ctrl_button_.Initialize(&tca6408a_handle_, TCA6408A_CTRL_BUTTON_GPIO, true);
+        ctrl_button_.Initialize(&interrupt_manager_);
 
-        ctrl_button_->OnClick([this]()
-                              {
-                                auto &app = Application::GetInstance();
-                                app.ToggleChatState(); // 切换聊天状态（打断）
-                                ESP_LOGI(TAG, "Clicked - RED LED on");
-                                static bool state = false;
-                                state = !state;
-                                tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, state ? 1 : 0); });
+        ctrl_button_.OnClick([this]()
+                             {
 
-        ctrl_button_->OnDoubleClick([this]()
-                                    {
-                                        ESP_LOGI(TAG, "Double clicked - Toggle GREEN LED");
-                                        static bool state = false;
-                                        state = !state;
-                                        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, state ? 1 : 0); 
-                                        auto &app = Application::GetInstance();
-                                        if (app.GetDeviceState() == kDeviceStateStarting)
-                                        {
-                                            EnterWifiConfigMode();
-                                            return;
-                                        } });
-        ctrl_button_->OnLongPress([this]()
-                                  {
+                                 auto &app = Application::GetInstance();
+                                 
+                                 if (gc2145_camera_) {
+                                     if (gc2145_camera_->IsPreviewActive()) {
+                                         gc2145_camera_->StopPreview();
+                                         ESP_LOGI(TAG, "Preview stopped");
+                                     } else {
+                                         gc2145_camera_->StartPreview();
+                                         ESP_LOGI(TAG, "Preview started");
+                                     }
+                                 } else {
+                                     app.ToggleChatState();
+                                 } });
+
+        ctrl_button_.OnDoubleClick([this]()
+                                   {
+                                       
+                                       auto &app = Application::GetInstance();
+                                       if (app.GetDeviceState() == kDeviceStateStarting)
+                                       {
+                                           EnterWifiConfigMode();
+                                           return;
+                                       }
+                                       ESP_LOGI(TAG, "Double clicked"); });
+        ctrl_button_.OnLongPress([this]()
+                                 {
                                       ESP_LOGI(TAG, "On Long Press");
                                       static bool state = false;
                                       state = !state;
-                                      // 切换电源状态
                                       if (state)
                                       {
                                           PowerOn();
@@ -141,59 +257,218 @@ private:
         ESP_LOGI(TAG, "Control button initialized on P%d", TCA6408A_CTRL_BUTTON_GPIO);
     }
 
-    void InitializeCamera() {
-        static esp_cam_ctlr_dvp_pin_config_t dvp_pin_config = {
-            .data_width = CAM_CTLR_DATA_WIDTH_8,
-            .data_io = {
-                [0] = CAMERA_PIN_D2,
-                [1] = CAMERA_PIN_D3,
-                [2] = CAMERA_PIN_D4,
-                [3] = CAMERA_PIN_D5,
-                [4] = CAMERA_PIN_D6,
-                [5] = CAMERA_PIN_D7,
-                [6] = CAMERA_PIN_D8,
-                [7] = CAMERA_PIN_D9,
-            },
-            .vsync_io = CAMERA_PIN_VSYNC,
-            .de_io = CAMERA_PIN_HREF,
-            .pclk_io = CAMERA_PIN_PCLK,
-            .mclk_io = CAMERA_PIN_MCLK,
-        };
-
-        esp_video_init_sccb_config_t sccb_config = {
-            .init_sccb = false,
-            .i2c_handle = i2c_bus_,
-            .freq = 100000,
-        };
-
-        esp_video_init_dvp_config_t dvp_config = {
-            .sccb_config = sccb_config,
-            .reset_pin = CAMERA_PIN_RESET,
-            .pwdn_pin = CAMERA_PIN_PWDN,
-            .dvp_pin = dvp_pin_config,
-            .xclk_freq = XCLK_FREQ_HZ,
-        };
-
-        esp_video_init_config_t video_config = {
-            .dvp = &dvp_config,
-        };
-
-        camera_ = new Esp32Camera(video_config);
-        ESP_LOGI(TAG, "Camera initialized successfully");
+    void InitializeCamera()
+    {
+        ESP_LOGI(TAG, "Initializing GC2145 camera using direct SCCB driver...");
+        
+        // 创建 GC2145 摄像头实例
+        gc2145_camera_ = new Gc2145Camera(i2c_bus_);
+        
+        if (!gc2145_camera_) {
+            ESP_LOGE(TAG, "Failed to create GC2145 camera instance");
+            return;
+        }
+        
+        // 初始化传感器
+        esp_err_t ret = gc2145_camera_->InitSensor();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to initialize GC2145 sensor: %d", ret);
+            delete gc2145_camera_;
+            gc2145_camera_ = nullptr;
+            return;
+        }
+        
+        // 配置分辨率 (QVGA: 320x240)
+        ret = gc2145_camera_->ConfigureResolution(320, 240);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure resolution: %d", ret);
+            delete gc2145_camera_;
+            gc2145_camera_ = nullptr;
+            return;
+        }
+        
+        camera_initialized_ = true;
+        ESP_LOGI(TAG, "GC2145 camera initialized successfully");
     }
 
-    // 处理自动唤醒逻辑
+    void EnableLcdCs(bool enable)
+    {
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, enable ? 0 : 1);
+    }
+
+    
+    void InitializeLcdDisplay() {
+        esp_lcd_panel_io_handle_t panel_io = nullptr;
+        esp_lcd_panel_handle_t panel = nullptr;
+
+        ESP_LOGI(TAG, "Starting LCD initialization");
+        
+        // 确保背光关闭
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        
+        ESP_LOGD(TAG, "Install panel IO");
+        esp_lcd_panel_io_spi_config_t io_config = {};
+        io_config.cs_gpio_num = GPIO_NUM_NC;
+        io_config.dc_gpio_num = SPI_PIN_NUM_LCD_DC;
+        io_config.spi_mode = 0;
+        io_config.pclk_hz = 40 * 1000 * 1000;
+        io_config.trans_queue_depth = 10;
+        io_config.lcd_cmd_bits = 8;
+        io_config.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &panel_io));
+        ESP_LOGI(TAG, "Panel IO installed");
+
+        ESP_LOGD(TAG, "Install LCD driver");
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = GPIO_NUM_NC;
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+        panel_config.bits_per_pixel = 16;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_ili9342(panel_io, &panel_config, &panel));
+        ESP_LOGI(TAG, "LCD driver installed");
+        
+        // 拉低 CS 使能 LCD
+        ESP_LOGD(TAG, "Setting LCD CS low to enable communication");
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_LCD_CS_GPIO, 0);
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        esp_lcd_panel_reset(panel);
+        ESP_LOGI(TAG, "Panel reset");
+        
+        // 增加复位后的延迟
+        vTaskDelay(pdMS_TO_TICKS(120));
+
+        esp_lcd_panel_init(panel);
+        ESP_LOGI(TAG, "Panel initialized");
+
+        
+        
+        
+        esp_lcd_panel_invert_color(panel, false);
+        esp_lcd_panel_swap_xy(panel, DISPLAY_SWAP_XY);
+        esp_lcd_panel_mirror(panel, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        ESP_LOGI(TAG, "Panel configuration: swap_xy=%d, mirror_x=%d, mirror_y=%d", 
+                 DISPLAY_SWAP_XY, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
+        
+        esp_lcd_panel_disp_on_off(panel, true);
+        ESP_LOGI(TAG, "Display turned on");
+        vTaskDelay(pdMS_TO_TICKS(50));
+
+        lcd_panel_ = panel;
+        lcd_io_ = panel_io;
+
+        
+
+#if CONFIG_USE_EMOTE_MESSAGE_STYLE
+        display_ = new emote::EmoteDisplay(panel, panel_io, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+        ESP_LOGI(TAG, "EmoteDisplay created");
+#else
+        display_ = new SpiLcdDisplay(panel_io, panel,
+            DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
+            DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+        ESP_LOGI(TAG, "SpiLcdDisplay created");
+#endif
+
+        if (display_) {
+            ESP_LOGI(TAG, "Display object created successfully");
+            ESP_LOGI(TAG, "Display size: %dx%d", display_->width(), display_->height());
+        } else {
+            ESP_LOGE(TAG, "Failed to create display object!");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(500));
+
+        // 打开背光
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL, 1);
+        ESP_LOGI(TAG, "Backlight turned on");
+        vTaskDelay(pdMS_TO_TICKS(100));
+
+        ESP_LOGI(TAG, "ILI9342 LCD initialization completed");
+    }
+
+
+    void InitializeServo()
+    {
+        // 初始化第一个舵机（IO3）- 例如：云台水平控制
+        motor_controller_.InitializeServo(SERVO_ID_1, SERVO_GPIO_1);
+        ESP_LOGI(TAG, "Servo 1 initialized on GPIO %d", SERVO_GPIO_1);
+        
+        // 初始化第二个舵机（IO39）- 例如：云台垂直控制
+        motor_controller_.InitializeServo(SERVO_ID_2, SERVO_GPIO_2);
+        ESP_LOGI(TAG, "Servo 2 initialized on GPIO %d", SERVO_GPIO_2);
+    }
+    
+
+    
+
+    void InitializeTools() {
+        auto &mcp_server = McpServer::GetInstance();
+        
+        mcp_server.AddTool("self.system.reconfigure_wifi",
+            "End this conversation and enter WiFi configuration mode.\n"
+            "**CAUTION** You must ask the user to confirm this action.",
+            PropertyList(), [this](const PropertyList& properties) -> std::string {
+                EnterWifiConfigMode();
+                return "{\"status\": \"entering_wifi_config_mode\"}";
+            });
+
+        // 第一个舵机工具（例如：云台水平）
+        mcp_server.AddTool("servo1.set_angle",
+            "Set servo 1 angle (horizontal pan) to specified position (0-180 degrees)",
+            PropertyList({
+                Property("angle", kPropertyTypeInteger)
+            }), [this](const PropertyList& properties) -> std::string {
+                int angle = properties["angle"].value<int>();
+                if (angle < 0) angle = 0;
+                if (angle > 180) angle = 180;
+                motor_controller_.SetAngle(SERVO_ID_1, angle);
+                return "{\"status\": \"success\", \"servo_id\": 1, \"angle\": " + std::to_string(angle) + "}";
+            });
+
+        mcp_server.AddTool("servo1.get_angle",
+            "Get current servo 1 angle (horizontal pan)",
+            PropertyList(), [this](const PropertyList& properties) -> std::string {
+                uint16_t angle = motor_controller_.GetAngle(SERVO_ID_1);
+                return "{\"status\": \"success\", \"servo_id\": 1, \"angle\": " + std::to_string(angle) + "}";
+            });
+
+        // 第二个舵机工具（例如：云台垂直）
+        mcp_server.AddTool("servo2.set_angle",
+            "Set servo 2 angle (vertical tilt) to specified position (0-180 degrees)",
+            PropertyList({
+                Property("angle", kPropertyTypeInteger)
+            }), [this](const PropertyList& properties) -> std::string {
+                int angle = properties["angle"].value<int>();
+                if (angle < 0) angle = 0;
+                if (angle > 180) angle = 180;
+                motor_controller_.SetAngle(SERVO_ID_2, angle);
+                return "{\"status\": \"success\", \"servo_id\": 2, \"angle\": " + std::to_string(angle) + "}";
+            });
+
+        mcp_server.AddTool("servo2.get_angle",
+            "Get current servo 2 angle (vertical tilt)",
+            PropertyList(), [this](const PropertyList& properties) -> std::string {
+                uint16_t angle = motor_controller_.GetAngle(SERVO_ID_2);
+                return "{\"status\": \"success\", \"servo_id\": 2, \"angle\": " + std::to_string(angle) + "}";
+            });
+        
+    }
+
+    
+    
+
+    
+
     void HandleAutoWake()
     {
         auto &app = Application::GetInstance();
         if (app.GetDeviceState() == DeviceState::kDeviceStateIdle)
         {
             auto &app = Application::GetInstance();
-            // USB充电状态下开机需要播放音效
-            if (power_manager_->IsUsbPowered())
+            if (power_manager_.IsUsbPowered())
             {
                 app.PlaySound(Lang::Sounds::OGG_SUCCESS);
-                vTaskDelay(pdMS_TO_TICKS(500)); // 延时500ms播放音效
+                vTaskDelay(pdMS_TO_TICKS(500));
             }
             app.Schedule([]()
                          {
@@ -202,7 +477,6 @@ private:
         }
         else
         {
-            // 设备尚未进入空闲状态，500ms后再次检查，使用定时器异步检查，不阻塞当前任务
             esp_timer_handle_t check_timer;
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
@@ -213,48 +487,54 @@ private:
             timer_args.arg = this;
             timer_args.name = "check_idle_timer";
             esp_timer_create(&timer_args, &check_timer);
-            esp_timer_start_once(check_timer, 500000); // 500ms = 500000微秒
+            esp_timer_start_once(check_timer, 500000);
         }
         ESP_LOGI(TAG, "Handle Auto Wake.");
     }
 
-    // 开机流程
     void PowerOn()
     {
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, 1);
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, 1);
+        power_manager_.PowerOn();
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 1);
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, 1);
+
+        led_controller_.UpdateLedStatus(power_manager_);
 
         ESP_LOGI(TAG, "Device powered on.");
 
-        HandleAutoWake(); // 开机自动唤醒
+        HandleAutoWake();
     }
 
-    // 关机流程
     void PowerOff()
     {
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_PWR_HOLD_GPIO, 0);
+        power_manager_.PowerOff();
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_AUDIO_CODEC_PA_PIN, 0);
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_RED_GPIO, 0);
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_LED_GREEN_GPIO, 0);
+        tca6408a_set_gpio_level(&tca6408a_second_handle_, TCA6408A_SECOND_VBAT_EN_GPIO, 0);
 
-        Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
+        led_controller_.UpdateLedStatus(power_manager_);
 
+        Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
         ESP_LOGI(TAG, "Device powered off.");
     }
 
 public:
-    FogSeekEdgeCamera() : boot_button_(BOOT_BUTTON_GPIO),
-                    interrupt_manager_(nullptr),
-                    ctrl_button_(nullptr),
-                    power_manager_(nullptr)
+    FogSeekEdgeCamera() : boot_button_(BOOT_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializeTca6408a();
+        InitializeSpi();
+        InitializeLcdDisplay();
         InitializeInterruptManager();
         InitializePowerManager();
+        InitializeLedController();
         InitializeCtrlButton();
         InitializeCamera();
+        InitializeServo();
+        InitializeTools();
+
+        if (display_) {
+            GetBacklight()->RestoreBrightness();
+        }
     }
 
     virtual AudioCodec *GetAudioCodec() override
@@ -275,13 +555,32 @@ public:
         return &audio_codec;
     }
 
-    virtual Camera* GetCamera() override {
-        return camera_;
+    virtual Led *GetLed() override
+    {
+        return led_controller_.GetGreenLed();
     }
+
+    virtual Camera* GetCamera() override
+    {
+        return gc2145_camera_;
+    }
+
+    virtual Display* GetDisplay() override {
+        return display_;
+    }
+    
+    virtual Backlight* GetBacklight() override {
+        static Tca6408aBacklight backlight(&tca6408a_second_handle_, TCA6408A_SECOND_QSPI_PIN_NUM_LCD_BL);
+        return &backlight;
+    }
+
+    FogSeekMotorController* GetMotorController() {
+        return &motor_controller_;
+    }
+
 
     ~FogSeekEdgeCamera()
     {
-        // 停止并删除按钮监控定时器
         if (button_monitor_timer_)
         {
             esp_timer_stop(button_monitor_timer_);
@@ -289,28 +588,24 @@ public:
             button_monitor_timer_ = nullptr;
         }
 
-        if (power_manager_)
-        {
-            delete power_manager_;
+        if (lcd_panel_) {
+            esp_lcd_panel_del(lcd_panel_);
+        }
+        if (lcd_io_) {
+            esp_lcd_panel_io_del(lcd_io_);
+        }
+        spi_bus_free(SPI2_HOST);
+
+        if (gc2145_camera_) {
+            delete gc2145_camera_;
+            gc2145_camera_ = nullptr;
         }
 
-        if (ctrl_button_)
-        {
-            delete ctrl_button_;
-        }
-
-        if (interrupt_manager_)
-        {
-            delete interrupt_manager_;
-        }
+        camera_ = nullptr;
 
         if (i2c_bus_)
         {
             i2c_del_master_bus(i2c_bus_);
-        }
-        if (camera_)
-        {
-            delete camera_;
         }
     }
 };
