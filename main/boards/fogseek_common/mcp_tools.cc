@@ -14,6 +14,7 @@
 #include <vector>
 #include <tuple>
 
+
 static const char *TAG = "McpTools";
 
 void InitializeSystemMCP(
@@ -296,8 +297,8 @@ void InitializeRgbLedMCP(
 
     // 添加RGB LED 开灯效果的工具函数
     mcp_server.AddTool("self.light.turn_on",
-                       "执行开灯动画效果，LED 灯珠依次点亮，最终达到目标颜色。",
-                       PropertyList({Property("total_time_ms", kPropertyTypeInteger, 1000, 200, 5000),
+                       "打开灯光，执行开灯动画效果，LED 灯珠依次点亮，最终达到目标颜色。",
+                       PropertyList({Property("total_time_ms", kPropertyTypeInteger, 2000, 200, 5000),
                                      Property("red", kPropertyTypeInteger, 0, 255),
                                      Property("green", kPropertyTypeInteger, 0, 255),
                                      Property("blue", kPropertyTypeInteger, 0, 255)}),
@@ -327,7 +328,7 @@ void InitializeRgbLedMCP(
 
     // 添加RGB LED 关灯效果的工具函数
     mcp_server.AddTool("self.light.turn_off",
-                       "执行关灯动画效果，LED 灯珠亮度逐渐减弱直至完全熄灭。",
+                       "关闭灯光，执行关灯动画效果，LED 灯珠亮度逐渐减弱直至完全熄灭。",
                        PropertyList({Property("fade_time_ms", kPropertyTypeInteger, 1000, 200, 5000)}),
                        [&led_controller](const PropertyList &properties) -> ReturnValue
                        {
@@ -375,25 +376,23 @@ void InitializeMotorMCP(
 {
     // 添加直接控制电机状态的工具函数
     mcp_server.AddTool("self.motor.control_motor",
-                       "打开香氛/关闭香氛，用来控制香氛的开关状态，直接控制电机的开关状态，可以启动或停止电机运行，适用于需要立即响应的场景。",
+                       "打开喷雾,关闭喷雾，用来控制喷雾的开关状态，可以启动或停止喷雾运行，适用于需要立即响应的场景。",
                        PropertyList({Property("state", kPropertyTypeBoolean, true)}), // true表示默认值
                        [&motor_controller](const PropertyList &properties) -> ReturnValue
                        {
                            bool state = properties["state"].value<bool>();
-
-                           motor_controller.ControlMotor(state);
-
+                           motor_controller.ControlMotor(state);  
                            ESP_LOGI(TAG, "Motor control - State: %s", state ? "ON" : "OFF");
-
+                        
                            std::string response = "{\"success\":true"
                                                   ",\"state\":" +
                                                   std::string(state ? "true" : "false") + "}";
                            return response;
                        });
 
-    // 添加定时运行电机的工具函数
+    // 添加定时运行喷雾的工具函数
     mcp_server.AddTool("self.motor.run_timed",
-                       "让香氛工作指定时间，定时运行电机，让电机运行指定时间后自动停止，适用于控制香氛扩散时长等场景。",
+                       "让喷雾工作指定时间，定时运行喷雾，让喷雾运行指定时间后自动停止，适用于控制喷雾扩散时长等场景。",
                        PropertyList({Property("run_time_ms", kPropertyTypeInteger, 5000, 100, 60000)}), // 默认5秒，范围100ms到60秒
                        [&motor_controller](const PropertyList &properties) -> ReturnValue
                        {
@@ -426,7 +425,7 @@ void InitializeFragranceMCP(
                        {
                            fragrance_controller.SetMode(FragranceController::Mode::WORK_MODE);
 
-                           ESP_LOGI(TAG, "Fragrance controller set to WORK_MODE");
+                            ESP_LOGI(TAG, "Fragrance controller set to WORK_MODE");
 
                            std::string result = "{\"success\":true,\"mode\":\"work\"}";
                            return result;
@@ -439,9 +438,9 @@ void InitializeFragranceMCP(
                        [&fragrance_controller](const PropertyList &properties) -> ReturnValue
                        {
                            fragrance_controller.SetMode(FragranceController::Mode::SLEEP_AID_MODE);
-
+                           
                            ESP_LOGI(TAG, "Fragrance controller set to SLEEP_AID_MODE");
-
+ 
                            std::string result = "{\"success\":true,\"mode\":\"sleep_aid\"}";
                            return result;
                        });
@@ -453,24 +452,10 @@ void InitializeFragranceMCP(
                        [&fragrance_controller](const PropertyList &properties) -> ReturnValue
                        {
                            fragrance_controller.SetMode(FragranceController::Mode::STRESS_RELIEF_MODE);
-
+                           
                            ESP_LOGI(TAG, "Fragrance controller set to STRESS_RELIEF_MODE");
 
                            std::string result = "{\"success\":true,\"mode\":\"stress_relief\"}";
-                           return result;
-                       });
-
-    // 添加关闭香氛的工具函数
-    mcp_server.AddTool("self.fragrance.turn_off",
-                       "关闭香氛扩散器，停止电机运行并关闭相关灯光效果。",
-                       PropertyList(),
-                       [&fragrance_controller](const PropertyList &properties) -> ReturnValue
-                       {
-                           fragrance_controller.SetMode(FragranceController::Mode::OFF_MODE);
-
-                           ESP_LOGI(TAG, "Fragrance controller turned OFF");
-
-                           std::string result = "{\"success\":true,\"mode\":\"off\"}";
                            return result;
                        });
 
@@ -501,6 +486,24 @@ void InitializeFragranceMCP(
                            std::string result = "{\"success\":true,\"level\":\"" + level + "\"}";
                            return result;
                        });
+    mcp_server.AddTool("self.fragrance.turn_on",
+                       "打开香氛，设置香氛扩散器为普通模式（NORMAL模式），开始正常的香氛扩散。",
+                       PropertyList(),
+                       [&fragrance_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           fragrance_controller.SetMode(FragranceController::Mode::NORMAL_MODE);
+                           std::string result = "{\"success\":true,\"mode\":\"normal\"}";
+                           return result;
+                       });
+    mcp_server.AddTool("self.fragrance.turn_off",
+                       "关闭香氛，设置香氛扩散器为关闭模式（OFF_MODE模式），结束，关闭香氛扩散。",
+                       PropertyList(),
+                       [&fragrance_controller](const PropertyList &properties) -> ReturnValue
+                       {
+                           fragrance_controller.SetMode(FragranceController::Mode::OFF_MODE);
+                           std::string result = "{\"success\":true,\"mode\":\"off\"}";
+                           return result;
+                       });
 }
 
 void InitializeLightPanelMCP(
@@ -523,6 +526,49 @@ void InitializeLightPanelMCP(
                            std::string response = "{\"success\":true"
                                                   ",\"state\":" +
                                                   std::string(state ? "true" : "false") + "}";
+                           return response;
+                       });
+}
+
+void InitializeMusicMCP(
+    McpServer &mcp_server)
+{
+    // 添加打开音乐的工具函数
+    mcp_server.AddTool("self.music.play",
+                       "打开音乐播放功能，将设备状态设置为空闲状态以便播放背景音乐。函数会自动将设备切换到空闲状态以播放背景音乐。执行此操作后，请直接结束对话，不要添加额外的确认或说明文字。",
+                       PropertyList(),
+                       [](const PropertyList &properties) -> ReturnValue
+                       {
+                           auto &app = Application::GetInstance();
+                           
+                           // 立即中断当前的说话（如果有）
+                           app.AbortSpeaking(kAbortReasonNone);
+                           
+                           // 将设备状态设置为空闲状态
+                           app.SetDeviceState(kDeviceStateIdle);
+                           
+                           ESP_LOGI(TAG, "Music play - Device state set to IDLE");
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"device_state\":\"idle\"}";
+                           return response;
+                       });
+
+    // 添加关闭音乐的工具函数
+    mcp_server.AddTool("self.music.stop",
+                       "关闭音乐播放功能，将设备状态设置为监听状态以便接收语音指令。",
+                       PropertyList(),
+                       [](const PropertyList &properties) -> ReturnValue
+                       {
+                           auto &app = Application::GetInstance();
+                           
+                           // 将设备状态设置为监听状态
+                           app.SetDeviceState(kDeviceStateListening);
+                           
+                           ESP_LOGI(TAG, "Music stop - Device state set to LISTENING");
+
+                           std::string response = "{\"success\":true"
+                                                  ",\"device_state\":\"listening\"}";
                            return response;
                        });
 }
