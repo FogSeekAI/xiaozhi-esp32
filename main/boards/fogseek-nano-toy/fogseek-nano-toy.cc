@@ -36,12 +36,12 @@
 #include <esp_lcd_io_spi.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_io_additions.h>
-#include "../esp_lcd_panel_io_spi_expander/esp_lcd_panel_io_spi_expander.h"
+// 已改用原生SPI，不再使用IO扩展器SPI
 #include "board.h"
 #include "display/lcd_display.h"
 #include "lvgl_theme.h"
 #include "settings.h"
-#include "backlight.h"
+// 背光由硬件控制，不再需要backlight
 #include "assets.h"
 #include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
 #include <sstream>
@@ -214,7 +214,7 @@ private:
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P3, TCA6408A_DIR_INPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P6, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P7, TCA6408A_DIR_INPUT);
-        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P0, TCA6408A_DIR_OUTPUT);
+        // P0 不再用于背光（背光由硬件电路控制）
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_GPIO_P6, 0);
         
         ESP_LOGI(TAG, "Tca6408a initialized successfully");
@@ -384,19 +384,15 @@ private:
             buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
         ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-        esp_lcd_panel_io_spi_expander_config_t io_config_1 = {
-            .pclk_hz = 40 * 1000 * 1000,
-            .spi_mode = 0,
-            .trans_queue_depth = 10,
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
-            .dc_gpio_num = DISPLAY_GC9D01_DC_GPIO,
-            .cs_expander_pin = DISPLAY_SPI_CS_1_GPIO,
-            .bl_pin = DISPLAY_GC9D01_BL_GPIO,
-            .bl_use_expander = true,
-            .expander_handle = &tca6408a_handle_,
-        };
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi_expander(SPI2_HOST, &io_config_1, &panel_io_1));
+        esp_lcd_panel_io_spi_config_t io_config_1 = {};
+        io_config_1.cs_gpio_num = DISPLAY_SPI_CS_1_GPIO;
+        io_config_1.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
+        io_config_1.spi_mode = 0;
+        io_config_1.pclk_hz = 40 * 1000 * 1000;
+        io_config_1.trans_queue_depth = 10;
+        io_config_1.lcd_cmd_bits = 8;
+        io_config_1.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_1, &panel_io_1));
 
 
         esp_lcd_panel_dev_config_t panel_config_1 = {};
@@ -414,19 +410,15 @@ private:
                                     DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
                                     DISPLAY_MIRROR_X_1, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
         
-        esp_lcd_panel_io_spi_expander_config_t io_config_2 = {
-            .pclk_hz = 40 * 1000 * 1000,
-            .spi_mode = 0,
-            .trans_queue_depth = 10,
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
-            .dc_gpio_num = DISPLAY_GC9D01_DC_GPIO,
-            .cs_expander_pin = DISPLAY_SPI_CS_2_GPIO,
-            .bl_pin = DISPLAY_GC9D01_BL_GPIO,
-            .bl_use_expander = true,
-            .expander_handle = &tca6408a_handle_,
-        };
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi_expander(SPI2_HOST, &io_config_2, &panel_io_2));
+        esp_lcd_panel_io_spi_config_t io_config_2 = {};
+        io_config_2.cs_gpio_num = DISPLAY_SPI_CS_2_GPIO;
+        io_config_2.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
+        io_config_2.spi_mode = 0;
+        io_config_2.pclk_hz = 40 * 1000 * 1000;
+        io_config_2.trans_queue_depth = 10;
+        io_config_2.lcd_cmd_bits = 8;
+        io_config_2.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_2, &panel_io_2));
 
 
         esp_lcd_panel_dev_config_t panel_config_2 = {};
@@ -448,7 +440,7 @@ private:
         if (display_1 != nullptr && display_2 != nullptr) {
             dual_display_ = new DualDisplayEmotionOnly(display_1, display_2);
         }
-        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO, 1);
+        // 背光由硬件电路控制，无需代码控制
     }
 
 
@@ -909,7 +901,6 @@ private:
 
         ESP_LOGI(TAG, "Device powered on.");
 
-        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO, 0);
         StartSensorMonitoring();
 
         HandleAutoWake();
@@ -922,7 +913,6 @@ private:
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
-        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO,1);
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
 
         ESP_LOGI(TAG, "Device powered off.");

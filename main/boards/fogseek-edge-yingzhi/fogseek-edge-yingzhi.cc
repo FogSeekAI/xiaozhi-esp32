@@ -23,7 +23,7 @@
 
 // 重发配置
 #define RETRY_INTERVAL_MS   500   // 重发间隔 (ms)
-#define RETRY_MAX_COUNT     3     // 最大重发次数
+#define RETRY_MAX_COUNT     1     // 最大重发次数
 #define ACK_TIMEOUT_MS      500  // 等待 ACK 超时时间 (ms)
 
 class FogSeekEdgeYingZhi : public WifiBoard {
@@ -49,6 +49,10 @@ private:
     // AUX 状态标记
     bool aux_inserted_ = false;
 
+    // ---- 查询响应同步 ----
+    SemaphoreHandle_t query_semaphore_ = nullptr;  // get_battery/get_volume 同步等待信号量
+    int queried_value_ = -1;                        // 查询结果缓存
+
     // ---- 重发机制 ----
     // 待确认命令结构
     struct PendingCommand {
@@ -62,11 +66,11 @@ private:
     PendingCommand pending_cmd_;
     bool has_pending_cmd_ = false;
 
-    // 发送命令并启动重发定时器
+    // 发送命令 (重发机制暂时注释掉用于测试)
     void SendCommandWithRetry(uint8_t cmd, const uint8_t* data = nullptr, uint8_t data_len = 0,
                               bool (*send_func)(AC7065ETransport*, uint8_t, const uint8_t*, uint8_t) = nullptr) {
-        // 如果上一次命令还没收到 ACK，先取消旧的重发
-        CancelPendingRetry();
+        // // 如果上一次命令还没收到 ACK，先取消旧的重发
+        // CancelPendingRetry();
 
         // 执行发送
         bool sent = false;
@@ -83,21 +87,21 @@ private:
         }
 
         if (!sent) {
-            ESP_LOGW(TAG, "Failed to send cmd=0x%02X, will retry", cmd);
+            ESP_LOGW(TAG, "Failed to send cmd=0x%02X", cmd);
         }
 
-        // 保存待确认命令
-        pending_cmd_.cmd = cmd;
-        pending_cmd_.data_len = data_len;
-        if (data && data_len > 0 && data_len <= sizeof(pending_cmd_.data)) {
-            memcpy(pending_cmd_.data, data, data_len);
-        }
-        pending_cmd_.retry_count = 0;
-        pending_cmd_.send_func = send_func;
-        has_pending_cmd_ = true;
+        // // 保存待确认命令
+        // pending_cmd_.cmd = cmd;
+        // pending_cmd_.data_len = data_len;
+        // if (data && data_len > 0 && data_len <= sizeof(pending_cmd_.data)) {
+        //     memcpy(pending_cmd_.data, data, data_len);
+        // }
+        // pending_cmd_.retry_count = 0;
+        // pending_cmd_.send_func = send_func;
+        // has_pending_cmd_ = true;
 
-        // 启动重发定时器
-        StartRetryTimer();
+        // // 启动重发定时器
+        // StartRetryTimer();
     }
 
     // 启动重发定时器
@@ -282,6 +286,10 @@ private:
     void InitializeAC7065EUart() {
         ESP_LOGI(TAG, "Initializing AC7065E UART...");
 
+        // 创建查询响应同步信号量
+        query_semaphore_ = xSemaphoreCreateBinary();
+        ESP_LOGI(TAG, "Query semaphore created");
+
         bool init_result = ac7065e_transport_.Initialize(
             UART_NUM_1, AC7065E_UART_TX_PIN, AC7065E_UART_RX_PIN, AC7065E_UART_BAUD_RATE);
         ESP_LOGI(TAG, "AC7065E UART init result: %s", init_result ? "SUCCESS" : "FAILED");
@@ -300,6 +308,13 @@ private:
     // 处理 AC7065E 上报消息
     void HandleAC7065EMessage(uint8_t cmd, const uint8_t* data, uint8_t len) {
         ESP_LOGI(TAG, "AC7065E message: cmd=0x%02X, len=%d", cmd, len);
+
+        // AC7065E 回显应答: cmd < 0x80 表示对方回传了我们发送的指令作为 ACK
+        if (cmd < 0x80) {
+            ESP_LOGI(TAG, "AC7065E ACK echo for cmd: 0x%02X", cmd);
+            // HandleAck(cmd);  // 重发机制暂时注释掉
+            return;
+        }
 
         switch (cmd) {
             case CMD_POWER_ON:  // 0x80 - 开关机状态上报
@@ -321,22 +336,19 @@ private:
                 HandleAuxRemoved();
                 break;
 
-            case CMD_CMD_ACK:  // 0x83 - 确认应答
-                if (len >= 1) {
-                    ESP_LOGI(TAG, "AC7065E ACK for cmd: 0x%02X", data[0]);
-                    HandleAck(data[0]);
-                }
-                break;
-
             case CMD_BATTERY_RESP:  // 0x84 - 电量响应
                 if (len >= 1) {
                     ESP_LOGI(TAG, "AC7065E battery level: %d%%", data[0]);
+                    queried_value_ = data[0];
+                    if (query_semaphore_) xSemaphoreGive(query_semaphore_);
                 }
                 break;
 
             case CMD_VOL_RESP:  // 0x85 - 音量响应
                 if (len >= 1) {
                     ESP_LOGI(TAG, "AC7065E volume level: %d%%", data[0]);
+                    queried_value_ = data[0];
+                    if (query_semaphore_) xSemaphoreGive(query_semaphore_);
                 }
                 break;
 
@@ -443,14 +455,14 @@ private:
 
         // ---- 音量控制 ----
 
-        mcp_server.AddTool("self.ac7065e.volume_up", "音量加", PropertyList(),
+        mcp_server.AddTool("self.ac7065e.volume_up", "蓝牙音量增加一格（固定步进，约10%）", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
                                SendCommandWithRetry(CMD_VOL_UP);
                                ESP_LOGI(TAG, "MCP: VOL_UP -> OK");
                                return true;
                            });
 
-        mcp_server.AddTool("self.ac7065e.volume_down", "音量减", PropertyList(),
+        mcp_server.AddTool("self.ac7065e.volume_down", "蓝牙音量减少一格（固定步进，约10%）", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
                                SendCommandWithRetry(CMD_VOL_DOWN);
                                ESP_LOGI(TAG, "MCP: VOL_DOWN -> OK");
@@ -458,7 +470,10 @@ private:
                            });
 
         mcp_server.AddTool(
-            "self.ac7065e.volume_set", "设置默认音量 (0-100)",
+            "self.ac7065e.volume_set",
+            "设置蓝牙音量到指定百分比。参数 level 为 0-100 的整数，0=静音, 50=中等, 100=最大。"
+            "当用户说\"音量调到50%\"或\"音量设为80\"时，直接传入对应的数字即可。"
+            "注意：这是精确设置，与 volume_up/volume_down 的步进调节不同",
             PropertyList({
                 Property("level", kPropertyTypeInteger, 0, 100),
             }),
@@ -468,40 +483,52 @@ private:
                     level = 0;
                 if (level > 100)
                     level = 100;
-                uint8_t vol = static_cast<uint8_t>(level);
-                SendCommandWithRetry(CMD_VOL_DEFAULT, &vol, 1);
+                ac7065e_transport_.SendVolumeDefault(static_cast<uint8_t>(level));
                 ESP_LOGI(TAG, "MCP: VOL_DEFAULT(%d) -> OK", level);
                 return true;
             });
 
-        mcp_server.AddTool("self.ac7065e.volume_max", "设置为最大音量", PropertyList(),
+        mcp_server.AddTool("self.ac7065e.volume_max", "蓝牙音量设置为最大（实际范围上限90%）", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               SendCommandWithRetry(CMD_VOL_MAX);
-                               ESP_LOGI(TAG, "MCP: VOL_MAX -> OK");
+                               ac7065e_transport_.SendVolumeDefault(90);
+                               ESP_LOGI(TAG, "MCP: VOL_MAX(90%%) -> OK");
                                return true;
                            });
 
-        mcp_server.AddTool("self.ac7065e.volume_min", "设置为最小音量（或静音）", PropertyList(),
+        mcp_server.AddTool("self.ac7065e.volume_min", "蓝牙音量设置为最小/静音（0%）", PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
-                               SendCommandWithRetry(CMD_VOL_MIN);
-                               ESP_LOGI(TAG, "MCP: VOL_MIN -> OK");
+                               ac7065e_transport_.SendVolumeDefault(0);
+                               ESP_LOGI(TAG, "MCP: VOL_MIN(0%%) -> OK");
                                return true;
                            });
 
         // ---- 查询命令 ----
 
-        mcp_server.AddTool("self.ac7065e.get_battery", "查询 AC7065E 蓝牙模块电量", PropertyList(),
-                           [this](const PropertyList& properties) -> ReturnValue {
+        mcp_server.AddTool("self.ac7065e.get_battery", "查询 AC7065E 蓝牙模块电量",
+                           PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+                               queried_value_ = -1;
+                               // 清空可能残留的信号量（上次超时延迟响应）
+                               if (query_semaphore_) xSemaphoreTake(query_semaphore_, 0);
                                SendCommandWithRetry(CMD_GET_BATTERY);
-                               ESP_LOGI(TAG, "MCP: GET_BATTERY -> OK");
-                               return true;
+                               if (query_semaphore_ && xSemaphoreTake(query_semaphore_, pdMS_TO_TICKS(500)) == pdTRUE) {
+                                   ESP_LOGI(TAG, "MCP: GET_BATTERY -> %d%%", queried_value_);
+                                   return queried_value_;
+                               }
+                               ESP_LOGW(TAG, "MCP: GET_BATTERY timeout");
+                               return std::string("查询超时，请重试");
                            });
 
         mcp_server.AddTool("self.ac7065e.get_volume", "查询 AC7065E 蓝牙模块当前音量",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+                               queried_value_ = -1;
+                               if (query_semaphore_) xSemaphoreTake(query_semaphore_, 0);
                                SendCommandWithRetry(CMD_GET_VOL);
-                               ESP_LOGI(TAG, "MCP: GET_VOL -> OK");
-                               return true;
+                               if (query_semaphore_ && xSemaphoreTake(query_semaphore_, pdMS_TO_TICKS(500)) == pdTRUE) {
+                                   ESP_LOGI(TAG, "MCP: GET_VOL -> %d%%", queried_value_);
+                                   return queried_value_;
+                               }
+                               ESP_LOGW(TAG, "MCP: GET_VOL timeout");
+                               return std::string("查询超时，请重试");
                            });
 
         // ============================================================
@@ -691,6 +718,9 @@ public:
 
     ~FogSeekEdgeYingZhi() {
         CancelPendingRetry();
+        if (query_semaphore_) {
+            vSemaphoreDelete(query_semaphore_);
+        }
         // 移除状态变化监听器
         if (state_listener_id_ >= 0) {
             Application::GetInstance().GetStateMachine().RemoveStateChangeListener(state_listener_id_);

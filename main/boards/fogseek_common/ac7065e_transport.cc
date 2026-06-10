@@ -256,6 +256,35 @@ bool AC7065ETransport::SendCommand(uint8_t cmd, const uint8_t* data, uint8_t len
     return sent == (int)frame_size;
 }
 
+bool AC7065ETransport::SendVolumeDefault(uint8_t percent)
+{
+    if (!initialized_)
+    {
+        ESP_LOGE(TAG, "UART not initialized");
+        return false;
+    }
+
+    // 百分比 -> 协议编码:
+    //   100% -> 0x00, 90% -> 0x01, 80% -> 0x02, ... 10% -> 0x09, 0% -> 0x10
+    uint8_t level;
+    if (percent == 0) {
+        level = 0x10;
+    } else {
+        level = (100 - percent) / 10;
+    }
+
+    // 音量设置使用裸格式: AA 22 [LEVEL] (无 LEN, 无 CHK)
+    uint8_t frame[3];
+    frame[0] = AC7065E_HEADER;  // 0xAA
+    frame[1] = CMD_VOL_DEFAULT; // 0x22
+    frame[2] = level;
+
+    int sent = uart_write_bytes(uart_port_, frame, sizeof(frame));
+    ESP_LOGD(TAG, "Sent VOL_DEFAULT: percent=%d, level=0x%02X", percent, level);
+
+    return sent == sizeof(frame);
+}
+
 bool AC7065ETransport::SendErrorResponse(uint8_t cmd, uint8_t error_type)
 {
     if (!initialized_)

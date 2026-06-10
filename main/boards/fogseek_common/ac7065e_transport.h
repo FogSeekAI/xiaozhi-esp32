@@ -135,8 +135,13 @@ public:
     /** @brief 音量减 */
     bool SendVolumeDown() { return SendCommand(CMD_VOL_DOWN); }
 
-    /** @brief 设置默认音量 */
-    bool SendVolumeDefault(uint8_t volume) { return SendCommand(CMD_VOL_DEFAULT, volume); }
+    /**
+     * @brief 设置默认音量 (百分比 0-100)
+     * @param percent 音量百分比
+     *
+     * 协议映射: 0x00=100%, 0x01=90%, 0x02=80%, ... 0x09=10%, 0x10=0%
+     */
+    bool SendVolumeDefault(uint8_t percent);
 
     /** @brief 最大音量 */
     bool SendVolumeMax() { return SendCommand(CMD_VOL_MAX); }

@@ -112,13 +112,27 @@ python scripts/release.py fogseek-Nano
 |------|------|----------|
 | 音量加 | VOL_UP (0x20) | `AA 20 00 8A` |
 | 音量减 | VOL_DOWN (0x21) | `AA 21 00 8B` |
-| 设置默认音量 | VOL_DEFAULT (0x22) | `AA 22 01 [VOL] [CHK]` |
-| 最大音量 | VOL_MAX (0x23) | `AA 23 00 89` |
-| 最小音量/静音 | VOL_MIN (0x24) | `AA 24 00 8E` |
+| 设置音量 | VOL_DEFAULT (0x22) | `AA 22 [LEVEL]` (裸格式，无 LEN/CHK) |
+| 最大音量 | VOL_MAX (0x23) | 已改为调用 VOL_DEFAULT(90%) → `AA 22 09` |
+| 最小音量/静音 | VOL_MIN (0x24) | 已改为调用 VOL_DEFAULT(0%) → `AA 22 10` |
 
-> **VOL_DEFAULT 示例**: 设置默认音量为 70%（0x46）→ `AA 22 01 46 6F`
+> **VOL_DEFAULT 音量映射**: 百分比对应协议 LEVEL 值
 >
-> `CHK = 0xAA ^ 0x22 ^ 0x01 ^ 0x46 = 0x6F`
+> | 百分比 | LEVEL | 完整帧 HEX |
+> |--------|-------|-----------|
+> | 100% | 0x00 | `AA 22 00` |
+> | 90% | 0x01 | `AA 22 01` |
+> | 80% | 0x02 | `AA 22 02` |
+> | 70% | 0x03 | `AA 22 03` |
+> | 60% | 0x04 | `AA 22 04` |
+> | 50% | 0x05 | `AA 22 05` |
+> | 40% | 0x06 | `AA 22 06` |
+> | 30% | 0x07 | `AA 22 07` |
+> | 20% | 0x08 | `AA 22 08` |
+> | 10% | 0x09 | `AA 22 09` |
+> | 0% | 0x10 | `AA 22 10` |
+>
+> `LEVEL = (100 - percent) / 10`（0% 时固定为 0x10）
 
 #### 查询命令
 
@@ -174,14 +188,21 @@ python scripts/release.py fogseek-Nano
 
 #### 指令确认
 
-| 功能 | 说明 | HEX |
-|------|------|-----|
-| 确认 WAKEUP (0x01) | ACK 0x01 | `AA 83 01 01 29` |
-| 确认 SLEEP (0x02) | ACK 0x02 | `AA 83 01 02 2A` |
-| 确认 VOL_UP (0x20) | ACK 0x20 | `AA 83 01 20 08` |
-| 确认 VOL_DOWN (0x21) | ACK 0x21 | `AA 83 01 21 09` |
-| 确认 PLAY (0x10) | ACK 0x10 | `AA 83 01 10 38` |
-| 确认 PAUSE (0x11) | ACK 0x11 | `AA 83 01 11 39` |
+> AC7065E 收到命令后直接回传原始帧作为 ACK 应答。
+
+| 功能 | 说明 | 回显 HEX |
+|------|------|----------|
+| 确认 WAKEUP | 回显 0x01 | `AA 01 00 AB` |
+| 确认 SLEEP | 回显 0x02 | `AA 02 00 A8` |
+| 确认 PLAY | 回显 0x10 | `AA 10 00 BA` |
+| 确认 PAUSE | 回显 0x11 | `AA 11 00 BB` |
+| 确认 NEXT_TRACK | 回显 0x12 | `AA 12 00 B8` |
+| 确认 PREV_TRACK | 回显 0x13 | `AA 13 00 B9` |
+| 确认 VOL_UP | 回显 0x20 | `AA 20 00 8A` |
+| 确认 VOL_DOWN | 回显 0x21 | `AA 21 00 8B` |
+| 确认 VOL_DEFAULT | 回显 0x22 | `AA 22 [LEVEL]` (裸格式) |
+| 确认 GET_BATTERY | 回显 0x30 | `AA 30 00 9A` |
+| 确认 GET_VOL | 回显 0x31 | `AA 31 00 9B` |
 
 #### 电量/音量响应
 
@@ -217,8 +238,8 @@ python scripts/release.py fogseek-Nano
 | PREV_TRACK | 0x13 | `AA 13 00 B9` | `0xAA ^ 0x13 ^ 0x00 = 0xB9` |
 | VOL_UP | 0x20 | `AA 20 00 8A` | `0xAA ^ 0x20 ^ 0x00 = 0x8A` |
 | VOL_DOWN | 0x21 | `AA 21 00 8B` | `0xAA ^ 0x21 ^ 0x00 = 0x8B` |
-| VOL_MAX | 0x23 | `AA 23 00 89` | `0xAA ^ 0x23 ^ 0x00 = 0x89` |
-| VOL_MIN | 0x24 | `AA 24 00 8E` | `0xAA ^ 0x24 ^ 0x00 = 0x8E` |
+| VOL_MAX | 0x23 | 改用 VOL_DEFAULT(90%): `AA 22 09` | 实际范围 0%-90% |
+| VOL_MIN | 0x24 | 改用 VOL_DEFAULT(0%): `AA 22 10` | 实际范围 0%-90% |
 | GET_BATTERY | 0x30 | `AA 30 00 9A` | `0xAA ^ 0x30 ^ 0x00 = 0x9A` |
 | GET_VOL | 0x31 | `AA 31 00 9B` | `0xAA ^ 0x31 ^ 0x00 = 0x9B` |
 
