@@ -7,7 +7,7 @@
 #include <esp_lcd_panel_interface.h>
 #include <esp_lcd_st77916.h>
 #include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
-#include "esp_lcd_jd9853.h"
+#include "boards/waveshare/esp32-s3-audio-board/esp_lcd_jd9853.h"
 #include <esp_err.h>
 #include <freertos/task.h>
 #include <cstring>

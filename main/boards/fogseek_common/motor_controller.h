@@ -42,10 +42,10 @@ public:
     void InitializeServo(ServoId id, gpio_num_t servo_gpio, uint32_t min_duty, uint32_t max_duty);
 
     // 设置舵机角度 (0-180度)
-    void SetAngle(uint16_t angle);
+    void SetAngle(ServoId id, uint16_t angle);
 
-    // 获取当前角度
-    uint16_t GetAngle() const;
+    // 获取指定舵机当前角度
+    uint16_t GetAngle(ServoId id) const;
 
     // 电机控制相关方法
     // 初始化电机控制器
@@ -57,7 +57,6 @@ public:
     // 定时运行电机，运行指定时间后停止
     void RunMotorTimed(uint32_t run_time_ms);
 
-    void InitializeMotor(gpio_num_t motor_gpio);
     void SetMotorDutyCycle(uint8_t percentage);
     void IncreaseMotorDutyCycle(uint8_t increment);
 
