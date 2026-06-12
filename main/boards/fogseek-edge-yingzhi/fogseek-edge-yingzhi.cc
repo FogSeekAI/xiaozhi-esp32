@@ -390,7 +390,14 @@ private:
 
         mcp_server.AddTool("self.ac7065e.wakeup", 
                            "使 AC7065E 蓝牙音频协处理器进入 AI 语音对话模式，对话模式同样保持蓝牙音乐播放。"
-                           "RGB 灯会自动同步为蓝色（AI模式），无需额外调用 set_color。",
+                           "RGB 灯会自动同步为蓝色（AI模式），无需额外调用 set_color。\n"
+                           "【触发场景】当用户说出以下唤醒词或打招呼词时，请首先调用此工具切换到 AI 对话模式：\n"
+                           "  - \"你好，小智\" / \"你好，小志\" / \"你好小智\" / \"你好小志\"\n"
+                           "  - \"小智小智\" / \"小志小志\"\n"
+                           "  - \"嗨，小智\" / \"嗨，小志\" / \"嘿，小智\" / \"嘿，小志\"\n"
+                           "  - \"小智在吗\" / \"小志在吗\"\n"
+                           "  - 类似的打招呼、呼唤设备名称的语句\n"
+                           "调用此工具后，设备进入 AI 对话模式，随后即可正常与用户进行语音对话。",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
                                SendCommandWithRetry(CMD_WAKEUP);
                                // 自动同步 RGB 为蓝色（AI 模式）
