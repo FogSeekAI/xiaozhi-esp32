@@ -6,8 +6,11 @@
 
 #define TAG "FogSeekMotorController"
 
-FogSeekMotorController::FogSeekMotorController() : timer_(LEDC_TIMER_0), 
-                                                   timer_initialized_(false),
+FogSeekMotorController::FogSeekMotorController() : servo_gpio_(GPIO_NUM_NC), 
+                                                   channel_(LEDC_CHANNEL_0), 
+                                                   timer_(LEDC_TIMER_0), 
+                                                   current_angle_(90), 
+                                                   initialized_(false), 
                                                    motor_gpio_(GPIO_NUM_NC),
                                                    motor_initialized_(false), 
                                                    motor_timer_handle_(nullptr),
@@ -76,13 +79,13 @@ void FogSeekMotorController::InitializeServo(ServoId id, gpio_num_t servo_gpio, 
     config.initialized = true;
     
     // 设置初始角度
-    SetAngle(id, config.current_angle);
-    
-    ESP_LOGI(TAG, "Servo %d initialized on GPIO %d (duty range: %lu-%lu)", 
-             id, config.gpio, config.min_duty, config.max_duty);
+    SetAngle(current_angle_);
+    initialized_ = true;
+
+    ESP_LOGI(TAG, "Servo controller initialized on GPIO %d", servo_gpio_);
 }
 
-void FogSeekMotorController::SetAngle(ServoId id, uint16_t angle)
+void FogSeekMotorController::SetAngle(uint16_t angle)
 {
     if (id >= SERVO_MAX) {
         ESP_LOGE(TAG, "Invalid servo ID: %d", id);
@@ -113,7 +116,7 @@ void FogSeekMotorController::SetAngle(ServoId id, uint16_t angle)
     ESP_LOGD(TAG, "Servo %d set to %d° (duty: %lu)", id, angle, duty);
 }
 
-uint16_t FogSeekMotorController::GetAngle(ServoId id) const
+uint16_t FogSeekMotorController::GetAngle() const
 {
     if (id >= SERVO_MAX) {
         return 0;
@@ -125,20 +128,6 @@ uint16_t FogSeekMotorController::GetAngle(ServoId id) const
     }
     
     return it->second.current_angle;
-}
-
-bool FogSeekMotorController::IsServoInitialized(ServoId id) const
-{
-    if (id >= SERVO_MAX) {
-        return false;
-    }
-    
-    auto it = servos_.find(id);
-    if (it == servos_.end()) {
-        return false;
-    }
-    
-    return it->second.initialized;
 }
 
 void FogSeekMotorController::InitializeMotor(gpio_num_t motor_gpio)
@@ -159,7 +148,7 @@ void FogSeekMotorController::InitializeMotor(gpio_num_t motor_gpio)
     
     motor_initialized_ = true;
     
-    ESP_LOGI(TAG, "Motor controller initialized on GPIO %d", motor_gpio_);
+    // ESP_LOGI(TAG, "Motor controller initialized on GPIO %d", motor_gpio_);
 }
 
 void FogSeekMotorController::ControlMotor(bool state)

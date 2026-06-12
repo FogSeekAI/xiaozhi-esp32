@@ -1,7 +1,6 @@
 #include "wifi_board.h"
 #include "config.h"
 #include "power_manager.h"
-#include "display_manager.h"
 #include "led_controller.h"
 #include "codecs/es8389_audio_codec.h"
 #include "system_reset.h"
@@ -13,22 +12,20 @@
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
-#include "mcp_tools.h"
 #include <esp_log.h>
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
-#include <wifi_manager.h>
 
-#define TAG "FogSeekNanoLinkBitVision"
+#define TAG "FogSeekNanoWeiJun"
 
-class FogSeekNanoLinkBitVision : public WifiBoard
+class FogSeekNanoWeiJun : public WifiBoard
 {
 private:
     Button boot_button_;
     Button ctrl_button_;
+    Button volume_button_; 
     FogSeekPowerManager power_manager_;
-    FogSeekDisplayManager display_manager_;
     FogSeekLedController led_controller_;
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
@@ -73,30 +70,6 @@ private:
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
     }
 
-    // 初始化显示管理器
-    void InitializeDisplayManager()
-    {
-        lcd_pin_config_t lcd_pin_config = {
-
-            lcd_pin_config_t lcd_pin_config = {
-            .spi_mosi_gpio = DISPLAY_SPI_MOSI_GPIO,
-            .spi_sclk_gpio = DISPLAY_SPI_SCLK_GPIO,
-            .spi_cs_gpio = DISPLAY_SPI_CS_GPIO,
-            .spi_dc_gpio = LCD_DC_GPIO,
-            .spi_reset_gpio = LCD_RESET_GPIO,
-            .spi_bl_gpio = LCD_BL_GPIO,
-            .width = LCD_H_RES,
-            .height = LCD_V_RES,
-            .offset_x = DISPLAY_OFFSET_X,
-            .offset_y = DISPLAY_OFFSET_Y,
-            .mirror_x = DISPLAY_MIRROR_X,
-            .mirror_y = DISPLAY_MIRROR_Y,
-            .swap_xy = DISPLAY_SWAP_XY,
-            .rotation=DISPLAY_ROTATION,
-        };
-        display_manager_.Initialize(BOARD_LCD_TYPE, &lcd_pin_config);
-    }
-
     // 初始化音频功放引脚并默认关闭功放
     void InitializeAudioAmplifier()
     {
@@ -114,25 +87,6 @@ private:
     void SetAudioAmplifierState(bool enable)
     {
         gpio_set_level(AUDIO_CODEC_PA_PIN, enable ? 1 : 0);
-    }
-
-    // 初始化扩展板电源使能引脚
-    void InitializeExtensionPowerEnable()
-    {
-        gpio_config_t io_conf;
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_OUTPUT;
-        io_conf.pin_bit_mask = (1ULL << EXTENSION_POWER_ENABLE_GPIO);
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        gpio_config(&io_conf);
-        SetExtensionPowerEnableState(false); // 默认关闭扩展板电源使能
-    }
-
-    // 设置扩展板电源使能状态
-    void SetExtensionPowerEnableState(bool enable)
-    {
-        gpio_set_level(EXTENSION_POWER_ENABLE_GPIO, enable ? 1 : 0);
     }
 
     // 初始化按键回调
@@ -159,8 +113,29 @@ private:
             } else {
                 PowerOff();
             } });
+        volume_button_.OnClick([this]()
+                              {
+                                auto codec = GetAudioCodec();
+                                int current_volume = codec->output_volume();
+                                int new_volume = current_volume + 20;
+                                if (new_volume > 90) {
+                                    new_volume = 90;
+                                }
+                                codec->SetOutputVolume(new_volume);
+                                ESP_LOGI(TAG, "Volume increased to: %d", new_volume);
+                              });
+        volume_button_.OnDoubleClick([this]()
+                                     {
+                                auto codec = GetAudioCodec();
+                                int current_volume = codec->output_volume();
+                                int new_volume = current_volume - 20;
+                                if (new_volume < 0) {
+                                    new_volume = 0;
+                                }
+                                codec->SetOutputVolume(new_volume);
+                                ESP_LOGI(TAG, "Volume decreased to: %d", new_volume);
+                                     });
     }
-
     // 处理自动唤醒逻辑
     void HandleAutoWake()
     {
@@ -186,7 +161,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNanoLinkBitVision *>(arg);
+                auto instance = static_cast<FogSeekNanoWeiJun *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -204,9 +179,7 @@ private:
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
-        SetAudioAmplifierState(true);
-
-        SetExtensionPowerEnableState(true); // 开机时打开扩展板电源使能
+        // SetAudioAmplifierState(true);
 
         ESP_LOGI(TAG, "Device powered on.");
 
@@ -216,14 +189,12 @@ private:
     // 关机流程
     void PowerOff()
     {
-        SetExtensionPowerEnableState(false); // 关机时关闭扩展板电源使能
-
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
-        SetAudioAmplifierState(false);
+        // SetAudioAmplifierState(false);
 
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle); // 关机后将设备状态设置为空闲，便于下次开机自动唤醒
 
@@ -231,24 +202,17 @@ private:
     }
 
 public:
-    FogSeekNanoLinkBitVision() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekNanoWeiJun() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO),volume_button_(VOLUME_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
-        InitializeDisplayManager();
         InitializeAudioAmplifier();
-        InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
-    }
-
-    virtual Display *GetDisplay() override
-    {
-        return display_manager_.GetDisplay();
     }
 
     virtual AudioCodec *GetAudioCodec() override
@@ -263,54 +227,18 @@ public:
             AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
-            GPIO_NUM_NC,
+            AUDIO_CODEC_PA_PIN,
             AUDIO_CODEC_ES8389_ADDR,
             true,
             true);
         return &audio_codec;
     }
-
-    // 重写StartNetwork方法，实现自定义Wi-Fi热点名称
-    virtual void StartNetwork() override
+    virtual Led *GetLed() override
     {
-        auto &wifi_manager = WifiManager::GetInstance();
-
-        // Initialize WiFi manager with custom SSID prefix
-        WifiManagerConfig config;
-        config.ssid_prefix = "LinkBit";
-        config.language = Lang::CODE;
-        wifi_manager.Initialize(config);
-
-        // Set unified event callback - forward to NetworkEvent with SSID data
-        wifi_manager.SetEventCallback([this, &wifi_manager](WifiEvent event)
-                                      {
-            std::string ssid = wifi_manager.GetSsid();
-            switch (event) {
-                case WifiEvent::Scanning:
-                    OnNetworkEvent(NetworkEvent::Scanning);
-                    break;
-                case WifiEvent::Connecting:
-                    OnNetworkEvent(NetworkEvent::Connecting, ssid);
-                    break;
-                case WifiEvent::Connected:
-                    OnNetworkEvent(NetworkEvent::Connected, ssid);
-                    break;
-                case WifiEvent::Disconnected:
-                    OnNetworkEvent(NetworkEvent::Disconnected);
-                    break;
-                case WifiEvent::ConfigModeEnter:
-                    OnNetworkEvent(NetworkEvent::WifiConfigModeEnter);
-                    break;
-                case WifiEvent::ConfigModeExit:
-                    OnNetworkEvent(NetworkEvent::WifiConfigModeExit);
-                    break;
-            } });
-
-        // Try to connect or enter config mode
-        TryWifiConnect();
+        return led_controller_.GetGreenLed();
     }
 
-    ~FogSeekNanoLinkBitVision()
+    ~FogSeekNanoWeiJun()
     {
         if (i2c_bus_)
         {
@@ -319,4 +247,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekNanoLinkBitVision);
+DECLARE_BOARD(FogSeekNanoWeiJun);

@@ -2,10 +2,10 @@
     "target": "esp32s3",
     "builds": [
         {
-            "name": "fogseek-dual-eyes-expand",
+            "name": "fogseek-nano-yulong",
             "sdkconfig_append": [
                 "CONFIG_USE_DEVICE_AEC=y",
-                "CONFIG_USE_DUAL_SCREEN=y"  
+                "CONFIG_SR_WN_WN9_HAIXIAOWU_TTS=y"
             ]
         }
     ]

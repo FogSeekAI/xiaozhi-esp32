@@ -63,4 +63,11 @@ void InitializeLightPanelMCP(
     McpServer &mcp_server,
     std::function<void(bool)> set_light_state_func);
 
+/**
+ * @brief 初始化音乐控制 MCP 工具函数
+ * @param mcp_server MCP 服务器实例
+ */
+void InitializeMusicMCP(
+    McpServer &mcp_server);
+
 #endif // _FOGSEEK_MCP_TOOLS_H_

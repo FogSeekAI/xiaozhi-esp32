@@ -1,8 +1,8 @@
 #include "wifi_board.h"
 #include "config.h"
 #include "power_manager.h"
-#include "display_manager.h"
 #include "led_controller.h"
+#include "motor_controller.h"
 #include "codecs/es8389_audio_codec.h"
 #include "system_reset.h"
 #include "application.h"
@@ -10,6 +10,7 @@
 #include "mcp_server.h"
 #include "lamp_controller.h"
 #include "led/single_led.h"
+#include "led/circular_strip.h"
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
@@ -18,23 +19,22 @@
 #include <driver/rtc_io.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
-#include <wifi_manager.h>
 
-#define TAG "FogSeekNanoLinkBitVision"
+#define TAG "FogSeekNanoWoodLightExtend"
 
-class FogSeekNanoLinkBitVision : public WifiBoard
+class FogSeekNanoWoodLightExtend : public WifiBoard
 {
 private:
     Button boot_button_;
     Button ctrl_button_;
     FogSeekPowerManager power_manager_;
-    FogSeekDisplayManager display_manager_;
     FogSeekLedController led_controller_;
-
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
     AudioCodec *audio_codec_ = nullptr;
     esp_timer_handle_t check_idle_timer_ = nullptr;
-
+    bool light_state_ = true; // 跟踪灯光状态
+    FogSeekMotorController motor_controller_;                                      // 添加电机控制器
+    FragranceController fragrance_controller_{led_controller_, motor_controller_}; // 香氛控制器
     // 初始化I2C外设
     void InitializeI2c()
     {
@@ -64,6 +64,23 @@ private:
         power_manager_.Initialize(&power_pin_config);
     }
 
+    // 初始化香氛电机控制引脚
+    void InitializeMotorControls()
+    {
+        // 初始化电机控制器
+        // motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
+        // gpio_set_level(MOTOR_GPIO, 0);
+        // ESP_LOGI(TAG, "GPIO controls initialized: MOTOR=%d", MOTOR_GPIO);
+        motor_controller_.InitializeMotor((gpio_num_t)MOTOR_GPIO);
+        gpio_config_t io_conf;
+        io_conf.intr_type = GPIO_INTR_DISABLE;
+        io_conf.mode = GPIO_MODE_OUTPUT;
+        io_conf.pin_bit_mask = (1ULL << MOTOR_GPIO);
+        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
+        gpio_config(&io_conf);
+        gpio_set_level(MOTOR_GPIO, 1); 
+    }
     // 初始化LED控制器
     void InitializeLedController()
     {
@@ -71,30 +88,6 @@ private:
             .red_gpio = LED_RED_GPIO,
             .green_gpio = LED_GREEN_GPIO};
         led_controller_.InitializeLeds(power_manager_, &led_pin_config);
-    }
-
-    // 初始化显示管理器
-    void InitializeDisplayManager()
-    {
-        lcd_pin_config_t lcd_pin_config = {
-
-            lcd_pin_config_t lcd_pin_config = {
-            .spi_mosi_gpio = DISPLAY_SPI_MOSI_GPIO,
-            .spi_sclk_gpio = DISPLAY_SPI_SCLK_GPIO,
-            .spi_cs_gpio = DISPLAY_SPI_CS_GPIO,
-            .spi_dc_gpio = LCD_DC_GPIO,
-            .spi_reset_gpio = LCD_RESET_GPIO,
-            .spi_bl_gpio = LCD_BL_GPIO,
-            .width = LCD_H_RES,
-            .height = LCD_V_RES,
-            .offset_x = DISPLAY_OFFSET_X,
-            .offset_y = DISPLAY_OFFSET_Y,
-            .mirror_x = DISPLAY_MIRROR_X,
-            .mirror_y = DISPLAY_MIRROR_Y,
-            .swap_xy = DISPLAY_SWAP_XY,
-            .rotation=DISPLAY_ROTATION,
-        };
-        display_manager_.Initialize(BOARD_LCD_TYPE, &lcd_pin_config);
     }
 
     // 初始化音频功放引脚并默认关闭功放
@@ -116,41 +109,48 @@ private:
         gpio_set_level(AUDIO_CODEC_PA_PIN, enable ? 1 : 0);
     }
 
-    // 初始化扩展板电源使能引脚
-    void InitializeExtensionPowerEnable()
+    // 初始化灯光板电源使能引脚
+    void InitializeLightController()
     {
         gpio_config_t io_conf;
         io_conf.intr_type = GPIO_INTR_DISABLE;
         io_conf.mode = GPIO_MODE_OUTPUT;
-        io_conf.pin_bit_mask = (1ULL << EXTENSION_POWER_ENABLE_GPIO);
+        io_conf.pin_bit_mask = (1ULL << LCD_BL_GPIO);
         io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
         io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
         gpio_config(&io_conf);
-        SetExtensionPowerEnableState(false); // 默认关闭扩展板电源使能
+        gpio_set_level(LCD_BL_GPIO, 0); 
+        //SetLightState(true); // 默认关闭状态（高电平）
     }
 
-    // 设置扩展板电源使能状态
-    void SetExtensionPowerEnableState(bool enable)
+    // 设置灯光板电源使能状态（低电平打开，高电平关闭）
+    void SetLightState(bool enable)
     {
-        gpio_set_level(EXTENSION_POWER_ENABLE_GPIO, enable ? 1 : 0);
+        // 由于硬件使用三极管，低电平导通，所以逻辑要反转
+        gpio_set_level(LCD_BL_GPIO, enable ? 0 : 1); // true时输出低电平，false时输出高电平
     }
 
     // 初始化按键回调
     void InitializeButtonCallbacks()
     {
         ctrl_button_.OnClick([this]()
-                             {
+                            {
+                                SetLightState(false);
+                                gpio_set_level(MOTOR_GPIO, 0);
+                                 //同时切换聊天状态（保持原有功能）
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）
                              });
         ctrl_button_.OnDoubleClick([this]()
-                                   {
-            auto &app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting)
-            {
-                EnterWifiConfigMode();
-                return;
-            } });
+                            {
+                                SetLightState(true);
+                                gpio_set_level(MOTOR_GPIO, 1);
+                                auto &app = Application::GetInstance();
+                                if (app.GetDeviceState() == kDeviceStateStarting)
+                                    {
+                                        EnterWifiConfigMode();
+                                        return;
+                                    } });
         ctrl_button_.OnLongPress([this]()
                                  {
             // 切换电源状态
@@ -186,7 +186,7 @@ private:
             esp_timer_create_args_t timer_args = {};
             timer_args.callback = [](void *arg)
             {
-                auto instance = static_cast<FogSeekNanoLinkBitVision *>(arg);
+                auto instance = static_cast<FogSeekNanoWoodLightExtend *>(arg);
                 instance->HandleAutoWake();
             };
             timer_args.arg = this;
@@ -206,8 +206,6 @@ private:
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
         SetAudioAmplifierState(true);
 
-        SetExtensionPowerEnableState(true); // 开机时打开扩展板电源使能
-
         ESP_LOGI(TAG, "Device powered on.");
 
         HandleAutoWake(); // 开机自动唤醒
@@ -216,8 +214,6 @@ private:
     // 关机流程
     void PowerOff()
     {
-        SetExtensionPowerEnableState(false); // 关机时关闭扩展板电源使能
-
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
@@ -230,25 +226,44 @@ private:
         ESP_LOGI(TAG, "Device powered off.");
     }
 
+    // 初始化MCP工具
+    void InitializeMCP()
+    {
+        // 获取MCP服务器实例
+        auto &mcp_server = McpServer::GetInstance();
+
+        // 初始化系统级MCP工具（如关机功能）
+        InitializeSystemMCP(mcp_server, power_manager_);
+
+        // 初始化灯光板MCP工具
+        InitializeLightPanelMCP(mcp_server, [this](bool state)
+                                { this->SetLightState(state); });
+
+        // 初始化电机MCP工具（如关机功能）
+        InitializeMotorMCP(mcp_server, motor_controller_);
+        // 初始化香氛控制相关的MCP工具
+        InitializeFragranceMCP(mcp_server, fragrance_controller_);
+    }
+
 public:
-    FogSeekNanoLinkBitVision() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
+    FogSeekNanoWoodLightExtend() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
         InitializePowerManager();
         InitializeLedController();
-        InitializeDisplayManager();
+        InitializeLightController();
         InitializeAudioAmplifier();
-        InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
-
-        // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯
+        InitializeMCP();
+        InitializeMotorControls();
+        // 设置电源状态变化回调函数
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
     }
 
-    virtual Display *GetDisplay() override
+    virtual Led *GetLed() override
     {
-        return display_manager_.GetDisplay();
+        return led_controller_.GetGreenLed();
     }
 
     virtual AudioCodec *GetAudioCodec() override
@@ -263,54 +278,14 @@ public:
             AUDIO_I2S_GPIO_WS,
             AUDIO_I2S_GPIO_DOUT,
             AUDIO_I2S_GPIO_DIN,
-            GPIO_NUM_NC,
+            AUDIO_CODEC_PA_PIN,
             AUDIO_CODEC_ES8389_ADDR,
             true,
             true);
         return &audio_codec;
     }
 
-    // 重写StartNetwork方法，实现自定义Wi-Fi热点名称
-    virtual void StartNetwork() override
-    {
-        auto &wifi_manager = WifiManager::GetInstance();
-
-        // Initialize WiFi manager with custom SSID prefix
-        WifiManagerConfig config;
-        config.ssid_prefix = "LinkBit";
-        config.language = Lang::CODE;
-        wifi_manager.Initialize(config);
-
-        // Set unified event callback - forward to NetworkEvent with SSID data
-        wifi_manager.SetEventCallback([this, &wifi_manager](WifiEvent event)
-                                      {
-            std::string ssid = wifi_manager.GetSsid();
-            switch (event) {
-                case WifiEvent::Scanning:
-                    OnNetworkEvent(NetworkEvent::Scanning);
-                    break;
-                case WifiEvent::Connecting:
-                    OnNetworkEvent(NetworkEvent::Connecting, ssid);
-                    break;
-                case WifiEvent::Connected:
-                    OnNetworkEvent(NetworkEvent::Connected, ssid);
-                    break;
-                case WifiEvent::Disconnected:
-                    OnNetworkEvent(NetworkEvent::Disconnected);
-                    break;
-                case WifiEvent::ConfigModeEnter:
-                    OnNetworkEvent(NetworkEvent::WifiConfigModeEnter);
-                    break;
-                case WifiEvent::ConfigModeExit:
-                    OnNetworkEvent(NetworkEvent::WifiConfigModeExit);
-                    break;
-            } });
-
-        // Try to connect or enter config mode
-        TryWifiConnect();
-    }
-
-    ~FogSeekNanoLinkBitVision()
+    ~FogSeekNanoWoodLightExtend()
     {
         if (i2c_bus_)
         {
@@ -319,4 +294,4 @@ public:
     }
 };
 
-DECLARE_BOARD(FogSeekNanoLinkBitVision);
+DECLARE_BOARD(FogSeekNanoWoodLightExtend);

@@ -7,6 +7,7 @@
 #include <esp_lcd_panel_interface.h>
 #include <esp_lcd_st77916.h>
 #include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
+#include "esp_lcd_jd9853.h"
 #include <esp_err.h>
 #include <freertos/task.h>
 #include <cstring>
@@ -517,6 +518,117 @@ static const st77916_lcd_init_cmd_t lcd_init_cmds_hxc_1_8_inch[] = {
     {0x11, (uint8_t[]){0x00}, 1, 120},
     {0x29, (uint8_t[]){0x00}, 1, 0},
 };
+//金逸晨2.01英寸屏幕初始化命令
+static const jd9853_lcd_init_cmd_t lcd_init_cmds_jyc_2_01_inch[] = {
+    {0xDF, (uint8_t[]){0x98}, 1, 0},
+    {0xDF, (uint8_t[]){0x53}, 1, 0},
+    {0xB2, (uint8_t[]){0x23}, 1, 0},
+    {0xB7, (uint8_t[]){0x00}, 1, 0},
+    {0xB7, (uint8_t[]){0x47}, 1, 0},
+    {0xB7, (uint8_t[]){0x00}, 1, 0},
+    {0xB7, (uint8_t[]){0x6F}, 1, 0},
+    {0xBB, (uint8_t[]){0x1C}, 1, 0},
+    {0xBB, (uint8_t[]){0x1A}, 1, 0},
+    {0xBB, (uint8_t[]){0x55}, 1, 0},
+    {0xBB, (uint8_t[]){0x73}, 1, 0},
+    {0xBB, (uint8_t[]){0x63}, 1, 0},
+    {0xBB, (uint8_t[]){0xF0}, 1, 0},
+    {0xC0, (uint8_t[]){0x44}, 1, 0},
+    {0xC0, (uint8_t[]){0x44}, 1, 0},
+    {0xC1, (uint8_t[]){0x12}, 1, 0},
+    {0xC3, (uint8_t[]){0x7D}, 1, 0},
+    {0xC3, (uint8_t[]){0x07}, 1, 0},
+    {0xC3, (uint8_t[]){0x14}, 1, 0},
+    {0xC3, (uint8_t[]){0x06}, 1, 0},
+    {0xC3, (uint8_t[]){0xCF}, 1, 0},
+    {0xC3, (uint8_t[]){0x71}, 1, 0},
+    {0xC3, (uint8_t[]){0x72}, 1, 0},
+    {0xC3, (uint8_t[]){0x77}, 1, 0},
+    {0xC4, (uint8_t[]){0x00}, 1, 0},
+    {0xC4, (uint8_t[]){0x00}, 1, 0},
+    {0xC4, (uint8_t[]){0xA0}, 1, 0},
+    {0xC4, (uint8_t[]){0x79}, 1, 0},
+    {0xC4, (uint8_t[]){0x0B}, 1, 0},
+    {0xC4, (uint8_t[]){0x0A}, 1, 0},
+    {0xC4, (uint8_t[]){0x16}, 1, 0},
+    {0xC4, (uint8_t[]){0x79}, 1, 0},
+    {0xC4, (uint8_t[]){0x0B}, 1, 0},
+    {0xC4, (uint8_t[]){0x0A}, 1, 0},
+    {0xC4, (uint8_t[]){0x16}, 1, 0},
+    {0xC4, (uint8_t[]){0x82}, 1, 0},
+    {0xC8, (uint8_t[]){0x3F}, 1, 0},
+    {0xC8, (uint8_t[]){0x32}, 1, 0},
+    {0xC8, (uint8_t[]){0x29}, 1, 0},
+    {0xC8, (uint8_t[]){0x29}, 1, 0},
+    {0xC8, (uint8_t[]){0x27}, 1, 0},
+    {0xC8, (uint8_t[]){0x2B}, 1, 0},
+    {0xC8, (uint8_t[]){0x27}, 1, 0},
+    {0xC8, (uint8_t[]){0x28}, 1, 0},
+    {0xC8, (uint8_t[]){0x28}, 1, 0},
+    {0xC8, (uint8_t[]){0x26}, 1, 0},
+    {0xC8, (uint8_t[]){0x25}, 1, 0},
+    {0xC8, (uint8_t[]){0x17}, 1, 0},
+    {0xC8, (uint8_t[]){0x12}, 1, 0},
+    {0xC8, (uint8_t[]){0x0D}, 1, 0},
+    {0xC8, (uint8_t[]){0x04}, 1, 0},
+    {0xC8, (uint8_t[]){0x00}, 1, 0},
+    {0xC8, (uint8_t[]){0x3F}, 1, 0},
+    {0xC8, (uint8_t[]){0x32}, 1, 0},
+    {0xC8, (uint8_t[]){0x29}, 1, 0},
+    {0xC8, (uint8_t[]){0x29}, 1, 0},
+    {0xC8, (uint8_t[]){0x27}, 1, 0},
+    {0xC8, (uint8_t[]){0x2B}, 1, 0},
+    {0xC8, (uint8_t[]){0x27}, 1, 0},
+    {0xC8, (uint8_t[]){0x28}, 1, 0},
+    {0xC8, (uint8_t[]){0x28}, 1, 0},
+    {0xC8, (uint8_t[]){0x26}, 1, 0},
+    {0xC8, (uint8_t[]){0x25}, 1, 0},
+    {0xC8, (uint8_t[]){0x17}, 1, 0},
+    {0xC8, (uint8_t[]){0x12}, 1, 0},
+    {0xC8, (uint8_t[]){0x0D}, 1, 0},
+    {0xC8, (uint8_t[]){0x04}, 1, 0},
+    {0xC8, (uint8_t[]){0x00}, 1, 0},
+    {0xD0, (uint8_t[]){0x04}, 1, 0},
+    {0xD0, (uint8_t[]){0x06}, 1, 0},
+    {0xD0, (uint8_t[]){0x6B}, 1, 0},
+    {0xD0, (uint8_t[]){0x0F}, 1, 0},
+    {0xD0, (uint8_t[]){0x00}, 1, 0},
+    {0xD7, (uint8_t[]){0x00}, 1, 0},
+    {0xD7, (uint8_t[]){0x30}, 1, 0},
+    {0xE6, (uint8_t[]){0x14}, 1, 0},
+    {0xDE, (uint8_t[]){0x01}, 1, 0},
+    {0xB7, (uint8_t[]){0x03}, 1, 0},
+    {0xB7, (uint8_t[]){0x13}, 1, 0},
+    {0xB7, (uint8_t[]){0xEF}, 1, 0},
+    {0xB7, (uint8_t[]){0x35}, 1, 0},
+    {0xB7, (uint8_t[]){0x35}, 1, 0},
+    {0xC1, (uint8_t[]){0x14}, 1, 0},
+    {0xC1, (uint8_t[]){0x15}, 1, 0},
+    {0xC1, (uint8_t[]){0xC0}, 1, 0},
+    {0xC2, (uint8_t[]){0x06}, 1, 0},
+    {0xC2, (uint8_t[]){0x3A}, 1, 0},
+    {0xC4, (uint8_t[]){0x72}, 1, 0},
+    {0xC4, (uint8_t[]){0x12}, 1, 0},
+    {0xBE, (uint8_t[]){0x00}, 1, 0},
+    {0xDE, (uint8_t[]){0x02}, 1, 0},
+    {0xE5, (uint8_t[]){0x00}, 1, 0},
+    {0xE5, (uint8_t[]){0x02}, 1, 0},
+    {0xE5, (uint8_t[]){0x00}, 1, 0},
+    {0xE5, (uint8_t[]){0x01}, 1, 0},
+    {0xE5, (uint8_t[]){0x02}, 1, 0},
+    {0xE5, (uint8_t[]){0x00}, 1, 0},
+    {0xDE, (uint8_t[]){0x00}, 1, 0},
+    {0x35, (uint8_t[]){0x00}, 1, 0},
+    {0x3A, (uint8_t[]){0x05}, 1, 0},
+    {0x11, (uint8_t[]){0x00}, 1, 120},
+    {0xDE, (uint8_t[]){0x02}, 1, 0},
+    {0xE5, (uint8_t[]){0x00}, 1, 0},
+    {0xE5, (uint8_t[]){0x02}, 1, 0},
+    {0xE5, (uint8_t[]){0x00}, 1, 0},
+    {0xDE, (uint8_t[]){0x00}, 1, 0},
+    {0x29, (uint8_t[]){0x00}, 1, 0},
+};
+
 
 // 配置表
 static const lcd_config_item_t wlk_1_8_config = {
@@ -549,11 +661,12 @@ static const lcd_config_item_t jyc_0_71_config = {
     .init_cmds = NULL, // 使用标准库默认初始化
     .init_cmds_size = 0};
 
-static const lcd_config_item_t nano_2_4_config = {
+static const lcd_config_item_t jyc_2_01_config = {
     .comm_type = COMM_SPI,
-    .driver_type = DRIVER_ST7789,
-    .init_cmds = NULL, // 使用标准库默认初始化
-    .init_cmds_size = 0};
+    .driver_type = DRIVER_JD9853,
+    .init_cmds = lcd_init_cmds_jyc_2_01_inch, // 使用标准库默认初始化
+    .init_cmds_size = sizeof(lcd_init_cmds_jyc_2_01_inch) / sizeof(jd9853_lcd_init_cmd_t)};
+
 // 通信接口和驱动接口的实现类定义
 class SpiCommInterface : public ICommInterface
 {
@@ -565,17 +678,16 @@ public:
             buscfg.mosi_io_num = (gpio_num_t)(pin_config->spi_mosi_gpio);
             buscfg.miso_io_num = GPIO_NUM_NC; // ST7789不需要MISO
             buscfg.sclk_io_num = (gpio_num_t)(pin_config->spi_sclk_gpio);
-            buscfg.data0_io_num = (gpio_num_t)(-1);
-            buscfg.data1_io_num = (gpio_num_t)(-1);
-            buscfg.data2_io_num = (gpio_num_t)(-1);
-            buscfg.data3_io_num = (gpio_num_t)(-1);
-            buscfg.data4_io_num = (gpio_num_t)(-1);
-            buscfg.data5_io_num = (gpio_num_t)(-1);
-            buscfg.data6_io_num = (gpio_num_t)(-1);
-            buscfg.data7_io_num = (gpio_num_t)(-1);
+            buscfg.quadwp_io_num = GPIO_NUM_NC;
+            buscfg.quadhd_io_num = GPIO_NUM_NC;
             buscfg.max_transfer_sz = (pin_config->width) * (pin_config->height)* sizeof(uint16_t);
-        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
-
+            
+        esp_err_t ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "SPI init failed");
+            return false;
+        }
 
         esp_lcd_panel_io_spi_config_t io_config = {};
             io_config.cs_gpio_num = (gpio_num_t)(pin_config->spi_cs_gpio);
@@ -650,10 +762,8 @@ public:
         // 创建ST7789面板
         esp_lcd_panel_dev_config_t panel_config = {};
         panel_config.reset_gpio_num = (gpio_num_t)(pin_config->spi_reset_gpio);
-        panel_config.color_space = ESP_LCD_COLOR_SPACE_BGR;
+        panel_config.color_space = ESP_LCD_COLOR_SPACE_RGB;
         panel_config.bits_per_pixel = 16;
-        panel_config.flags.reset_active_high = 0;
-        panel_config.vendor_config = NULL;
 
         esp_err_t ret = esp_lcd_new_panel_st7789(panel_io, &panel_config, panel);
         if (ret != ESP_OK)
@@ -814,6 +924,51 @@ public:
         return true;
     }
 };
+// JD9853驱动实现
+class Jd9853DisplayDriver : public IDisplayDriver
+{
+private:
+    lcd_type_t lcd_type_;
+public:
+    Jd9853DisplayDriver(lcd_type_t lcd_type) : lcd_type_(lcd_type) {}
+
+    bool Initialize(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t *panel, const lcd_pin_config_t *pin_config, const lcd_config_item_t &config) override
+    {
+        
+        jd9853_vendor_config_t vendor_config = {};
+        vendor_config.init_cmds = static_cast<const jd9853_lcd_init_cmd_t *>(config.init_cmds);
+        vendor_config.init_cmds_size = config.init_cmds_size;
+
+        esp_lcd_panel_dev_config_t panel_config = {};
+        panel_config.reset_gpio_num = (gpio_num_t)pin_config->spi_reset_gpio;
+        panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+        panel_config.bits_per_pixel = 16;
+        panel_config.vendor_config = &vendor_config;
+
+        // 创建JD9853面板
+        // esp_lcd_panel_dev_config_t panel_config = {};
+        // panel_config.reset_gpio_num = (gpio_num_t)(pin_config->spi_reset_gpio);
+        // panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+        // panel_config.bits_per_pixel = 16;
+
+        esp_err_t ret = esp_lcd_new_panel_jd9853(panel_io, &panel_config, panel);
+
+        if (ret != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Panel creation failed");
+            return false;
+        }
+
+        esp_lcd_panel_reset(*panel);
+        esp_lcd_panel_init(*panel);
+        esp_lcd_panel_disp_on_off(*panel, true);     // 打开显示
+        //esp_lcd_panel_invert_color(*panel, true);
+
+        ESP_LOGI(TAG, "JD9853 driver initialized successfully");
+        return true;
+       
+    }
+};
 // 构造函数
 FogSeekDisplayManager::FogSeekDisplayManager() : panel_io_(nullptr),
                                                 panel_(nullptr),
@@ -862,8 +1017,8 @@ const lcd_config_item_t *FogSeekDisplayManager::GetLcdConfig(lcd_type_t lcd_type
         return &hxc_1_15_config;
     case DISPLAY_TYPE_JYC_0_71_INCH:
         return &jyc_0_71_config;
-    case DISPLAY_TYPE_NANO_2_4_INCH:
-        return &nano_2_4_config;    
+    case DISPLAY_TYPE_JYC_2_01_INCH:
+        return &jyc_2_01_config;      
     default:
         ESP_LOGE(TAG, "Unsupported LCD type: %d", lcd_type);
         return nullptr;
@@ -892,7 +1047,9 @@ std::unique_ptr<IDisplayDriver> FogSeekDisplayManager::CreateDisplayDriver(drive
     case DRIVER_ST77916:
         return std::make_unique<St77916DisplayDriver>(lcd_type);
     case DRIVER_GC9D01:
-        return std::make_unique<Gc9d01DisplayDriver>(lcd_type);    
+        return std::make_unique<Gc9d01DisplayDriver>(lcd_type);
+    case DRIVER_JD9853:
+        return std::make_unique<Jd9853DisplayDriver>(lcd_type);        
     default:
         return nullptr;
     }
@@ -942,6 +1099,7 @@ void FogSeekDisplayManager::Initialize(lcd_type_t lcd_type, const lcd_pin_config
     }
 
     // 初始化通信接口
+    // comm_interface->Initialize(&panel_io_, pin_config);
     if (!comm_interface->Initialize(&panel_io_, pin_config))
     {
         ESP_LOGE(TAG, "Failed to initialize communication interface");
@@ -949,6 +1107,7 @@ void FogSeekDisplayManager::Initialize(lcd_type_t lcd_type, const lcd_pin_config
     }
 
     // 初始化驱动
+    // driver->Initialize(panel_io_, &panel_, pin_config, *config);
     if (!driver->Initialize(panel_io_, &panel_, pin_config, *config))
     {
         ESP_LOGE(TAG, "Failed to initialize display driver");
@@ -965,31 +1124,15 @@ void FogSeekDisplayManager::Initialize(lcd_type_t lcd_type, const lcd_pin_config
 
 bool FogSeekDisplayManager::InitializeComponents(const lcd_pin_config_t *pin_config)
 {
-    // 9. 初始化背光（如果BL引脚为NC则跳过，由硬件电路控制）
-    if (pin_config->spi_bl_gpio >= 0)
-    {
-        backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->spi_bl_gpio, true);
-        if (backlight_)
-        {
-            backlight_->SetBrightness(0);
-        }
-        SetBrightness(100);
-    }
-    else
-    {
-        ESP_LOGI(TAG, "Backlight is hardware-controlled, skipping software backlight init");
-    }
+    // 9. 初始化背光
+    backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->spi_bl_gpio, true);
+    //backlight_->SetBrightness(100);
     // 10. 创建SPI LCD显示对象
-    display_ = new (std::nothrow) SpiLcdDisplay(
-        panel_io_,
-        panel_,
-        pin_config->width,
-        pin_config->height,
-        pin_config->offset_x,
-        pin_config->offset_y,
-        pin_config->mirror_x,
-        pin_config->mirror_y,
-        pin_config->swap_xy);
+    display_ = new SpiLcdDisplay(panel_io_, panel_,
+                                pin_config->width,pin_config->height,
+                                pin_config->offset_x,pin_config->offset_y,
+                                pin_config->mirror_x,pin_config->mirror_y,
+                                pin_config->swap_xy);
 
     if (!display_)
     {
