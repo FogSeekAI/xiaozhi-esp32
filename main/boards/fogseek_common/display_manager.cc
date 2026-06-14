@@ -667,6 +667,12 @@ static const lcd_config_item_t jyc_2_01_config = {
     .init_cmds = lcd_init_cmds_jyc_2_01_inch, // 使用标准库默认初始化
     .init_cmds_size = sizeof(lcd_init_cmds_jyc_2_01_inch) / sizeof(jd9853_lcd_init_cmd_t)};
 
+static const lcd_config_item_t nano_2_4_config = {
+    .comm_type = COMM_SPI,
+    .driver_type = DRIVER_ST7789,
+    .init_cmds = NULL, // 使用标准库默认初始化
+    .init_cmds_size = 0};
+
 // 通信接口和驱动接口的实现类定义
 class SpiCommInterface : public ICommInterface
 {
@@ -1018,7 +1024,9 @@ const lcd_config_item_t *FogSeekDisplayManager::GetLcdConfig(lcd_type_t lcd_type
     case DISPLAY_TYPE_JYC_0_71_INCH:
         return &jyc_0_71_config;
     case DISPLAY_TYPE_JYC_2_01_INCH:
-        return &jyc_2_01_config;      
+        return &jyc_2_01_config;
+    case DISPLAY_TYPE_NANO_2_4_INCH:
+        return &nano_2_4_config;      
     default:
         ESP_LOGE(TAG, "Unsupported LCD type: %d", lcd_type);
         return nullptr;
@@ -1124,9 +1132,20 @@ void FogSeekDisplayManager::Initialize(lcd_type_t lcd_type, const lcd_pin_config
 
 bool FogSeekDisplayManager::InitializeComponents(const lcd_pin_config_t *pin_config)
 {
-    // 9. 初始化背光
-    backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->spi_bl_gpio, true);
-    //backlight_->SetBrightness(100);
+    // 9. 初始化背光（BL=NC 时由硬件电路控制，跳过软件初始化）
+    if (pin_config->spi_bl_gpio >= 0)
+    {
+        backlight_ = std::make_unique<PwmBacklight>((gpio_num_t)pin_config->spi_bl_gpio, true);
+        if (backlight_)
+        {
+            backlight_->SetBrightness(0);
+        }
+        SetBrightness(100);
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Backlight is hardware-controlled, skipping software backlight init");
+    }
     // 10. 创建SPI LCD显示对象
     display_ = new SpiLcdDisplay(panel_io_, panel_,
                                 pin_config->width,pin_config->height,
