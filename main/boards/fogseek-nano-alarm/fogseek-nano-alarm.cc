@@ -9,84 +9,21 @@
 #include "assets/lang_config.h"
 #include "adc_battery_monitor.h"
 #include "device_state_machine.h"
-#include "tca6408a_io_expander.h"
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <driver/i2c_master.h>
 #include <driver/gpio.h>
-#include <driver/spi_master.h>
 #include <esp_err.h>
-#include <esp_lcd_panel_io.h>
-#include <esp_lcd_io_spi.h>
 #include "board.h"
-#include "display/lcd_display.h"
-#include "lvgl_theme.h"
+#include "display/display.h"
 #include "settings.h"
-#include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
 #include <cJSON.h>
 #include <vector>
 #include <ctime>
 #include <algorithm>
 
 #define TAG "FogSeekNanoAlarm"
-
-// ============================================================================
-// 双屏情绪显示封装（与 nano-toy 相同）
-// ============================================================================
-class DualDisplayEmotionOnly : public Display {
-private:
-    SemaphoreHandle_t mutex_ = nullptr;
-
-public:
-    SpiLcdDisplay* display_1_ = nullptr;
-    SpiLcdDisplay* display_2_ = nullptr;
-
-    DualDisplayEmotionOnly(SpiLcdDisplay* disp1, SpiLcdDisplay* disp2)
-        : display_1_(disp1), display_2_(disp2) {
-        mutex_ = xSemaphoreCreateMutex();
-        if (!mutex_) {
-            ESP_LOGE(TAG, "Failed to create display mutex!");
-        }
-    }
-
-    ~DualDisplayEmotionOnly() {
-        if (mutex_) {
-            vSemaphoreDelete(mutex_);
-        }
-    }
-
-    void SetEmotion(const char* emotion) override {
-        if (display_1_) {
-            display_1_->SetEmotion(emotion);
-        }
-        if (display_2_) {
-            display_2_->SetEmotion(emotion);
-        }
-    }
-
-    void SetTheme(Theme* theme) override {
-        if (display_1_) display_1_->SetTheme(theme);
-        if (display_2_) display_2_->SetTheme(theme);
-    }
-
-    void SetChatMessage(const char* role, const char* content) override {
-        if (display_1_) display_1_->SetChatMessage(role, content);
-        if (display_2_) display_2_->SetChatMessage(role, content);
-    }
-
-    bool Lock(int timeout_ms = 0) override {
-        if (!mutex_) return false;
-        TickType_t ticks = timeout_ms == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-        return xSemaphoreTake(mutex_, ticks) == pdTRUE;
-    }
-
-    void Unlock() override {
-        if (mutex_) {
-            xSemaphoreGive(mutex_);
-        }
-    }
-};
 
 // ============================================================================
 // 闹钟重复模式
@@ -128,12 +65,7 @@ private:
     FogSeekLedController led_controller_;
 
     i2c_master_bus_handle_t i2c_bus_ = nullptr;
-    tca6408a_handle_t tca6408a_handle_;
     AudioCodec* audio_codec_ = nullptr;
-
-    SpiLcdDisplay* display_1_ = nullptr;
-    SpiLcdDisplay* display_2_ = nullptr;
-    DualDisplayEmotionOnly* dual_display_ = nullptr;
 
     // --- 闹钟系统 ---
     std::vector<AlarmEntry> alarms_;
@@ -544,24 +476,16 @@ private:
         active_alarm_id_ = alarm.id;
         alarm_repeat_count_ = 0;
 
-        // 1. 振动电机
-        StartMotorPulse();
-
-        // 2. LED 红绿交替闪烁
+        // 1. LED 红绿交替闪烁
         StartAlarmLedBlink();
 
-        // 3. 播放闹钟音频
+        // 2. 播放闹钟音频
         Application::GetInstance().PlaySound(Lang::Sounds::OGG_EXCLAMATION);
 
-        // 4. 启动重复响铃定时器
+        // 3. 启动重复响铃定时器
         esp_timer_start_periodic(alarm_repeat_timer_, ALARM_REPEAT_INTERVAL_MS * 1000);
 
-        // 5. 表情显示为闹钟状态
-        if (dual_display_) {
-            dual_display_->SetEmotion("alarm");
-        }
-
-        // 6. 通过 AI 语音播报闹钟（短唤醒词 + MCP Notification 传递完整详情）
+        // 4. 通过 AI 语音播报闹钟（短唤醒词 + MCP Notification 传递完整详情）
         auto& app = Application::GetInstance();
         std::string wake_msg = "闹钟-" + std::string(label);
 
@@ -598,19 +522,11 @@ private:
         alarm_active_ = false;
         active_alarm_id_ = -1;
 
-        // 停止电机
-        SetMotorState(false);
-
         // 停止重复定时器
         esp_timer_stop(alarm_repeat_timer_);
 
         // 停止 LED 闪烁
         StopAlarmLedBlink();
-
-        // 恢复表情
-        if (dual_display_) {
-            dual_display_->SetEmotion("neutral");
-        }
     }
 
     // ========================================================================
@@ -628,7 +544,6 @@ private:
         }
 
         ESP_LOGI(TAG, "Alarm repeat #%d", self->alarm_repeat_count_);
-        self->StartMotorPulse();
         // 主线程安全地播放音频
         Application::GetInstance().Schedule([]() {
             Application::GetInstance().PlaySound(Lang::Sounds::OGG_EXCLAMATION);
@@ -661,28 +576,6 @@ private:
     }
 
     // ========================================================================
-    // 电机控制
-    // ========================================================================
-    void SetMotorState(bool enable) {
-        uint8_t level = enable ? 1 : 0;
-        esp_err_t ret = tca6408a_set_gpio_level(&tca6408a_handle_,
-                                                static_cast<tca6408a_gpio_t>(TCA6408A_MOTOR_PIN),
-                                                level);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to set motor state: %d", ret);
-            return;
-        }
-        ESP_LOGI(TAG, "Motor: %s", enable ? "ON" : "OFF");
-    }
-
-    void StartMotorPulse() {
-        SetMotorState(true);
-        // 2秒后自动停止（使用重复闹钟定时器暂不创建额外定时器）
-        // 改用一次性定时器的思路：在下一个重复周期前会自动停止
-        // 这里直接通过 StopAlarm 统一停止
-    }
-
-    // ========================================================================
     // I2C 初始化
     // ========================================================================
     void InitializeI2c() {
@@ -699,21 +592,6 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
-    }
-
-    void InitializeTca6408a() {
-        tca6408a_config_t tca6408a_config = {
-            .i2c_bus = i2c_bus_,
-            .i2c_address = 0x20,
-            .reset_gpio = GPIO_NUM_5};
-        esp_err_t ret = tca6408a_init(&tca6408a_handle_, &tca6408a_config);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize Tca6408a");
-            return;
-        }
-        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P6, TCA6408A_DIR_OUTPUT);
-        tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_GPIO_P6, 0);
-        ESP_LOGI(TAG, "Tca6408a initialized (motor P6)");
     }
 
     // ========================================================================
@@ -800,82 +678,6 @@ private:
                 ESP_LOGI(TAG, "Alarm dismissed via BOOT button");
             }
         });
-    }
-
-    // ========================================================================
-    // 显示初始化
-    // ========================================================================
-    void InitializeDisplayManager() {
-        esp_lcd_panel_io_handle_t panel_io_1 = nullptr;
-        esp_lcd_panel_handle_t panel_1 = nullptr;
-        esp_lcd_panel_io_handle_t panel_io_2 = nullptr;
-        esp_lcd_panel_handle_t panel_2 = nullptr;
-
-        spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num = DISPLAY_SPI_MOSI_GPIO;
-        buscfg.miso_io_num = GPIO_NUM_NC;
-        buscfg.sclk_io_num = DISPLAY_SPI_SCLK_GPIO;
-        buscfg.quadwp_io_num = GPIO_NUM_NC;
-        buscfg.quadhd_io_num = GPIO_NUM_NC;
-        buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
-        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
-
-        // Display 1
-        esp_lcd_panel_io_spi_config_t io_config_1 = {};
-        io_config_1.cs_gpio_num = DISPLAY_SPI_CS_1_GPIO;
-        io_config_1.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
-        io_config_1.spi_mode = 0;
-        io_config_1.pclk_hz = 40 * 1000 * 1000;
-        io_config_1.trans_queue_depth = 10;
-        io_config_1.lcd_cmd_bits = 8;
-        io_config_1.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_1, &panel_io_1));
-
-        esp_lcd_panel_dev_config_t panel_config_1 = {};
-        panel_config_1.reset_gpio_num = DISPLAY_GC9D01_RESET_GPIO;
-        panel_config_1.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-        panel_config_1.bits_per_pixel = 16;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_1, &panel_config_1, &panel_1));
-
-        esp_lcd_panel_reset(panel_1);
-        esp_lcd_panel_init(panel_1);
-        esp_lcd_panel_disp_on_off(panel_1, true);
-
-        display_1_ = new SpiLcdDisplay(panel_io_1, panel_1,
-                                       DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                       DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                       DISPLAY_MIRROR_X_1, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-
-        // Display 2
-        esp_lcd_panel_io_spi_config_t io_config_2 = {};
-        io_config_2.cs_gpio_num = DISPLAY_SPI_CS_2_GPIO;
-        io_config_2.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
-        io_config_2.spi_mode = 0;
-        io_config_2.pclk_hz = 40 * 1000 * 1000;
-        io_config_2.trans_queue_depth = 10;
-        io_config_2.lcd_cmd_bits = 8;
-        io_config_2.lcd_param_bits = 8;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_2, &panel_io_2));
-
-        esp_lcd_panel_dev_config_t panel_config_2 = {};
-        panel_config_2.reset_gpio_num = GPIO_NUM_NC;
-        panel_config_2.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-        panel_config_2.bits_per_pixel = 16;
-        ESP_ERROR_CHECK(esp_lcd_new_panel_gc9d01n(panel_io_2, &panel_config_2, &panel_2));
-
-        esp_lcd_panel_reset(panel_2);
-        esp_lcd_panel_init(panel_2);
-        esp_lcd_panel_disp_on_off(panel_2, true);
-        esp_lcd_panel_mirror(panel_2, DISPLAY_MIRROR_X_2, DISPLAY_MIRROR_Y);
-
-        display_2_ = new SpiLcdDisplay(panel_io_2, panel_2,
-                                       DISPLAY_WIDTH, DISPLAY_HEIGHT,
-                                       DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y,
-                                       DISPLAY_MIRROR_X_2, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
-
-        if (display_1_ && display_2_) {
-            dual_display_ = new DualDisplayEmotionOnly(display_1_, display_2_);
-        }
     }
 
     // ========================================================================
@@ -1409,7 +1211,6 @@ private:
     }
 
     void PowerOff() {
-        SetMotorState(false);
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
@@ -1421,11 +1222,9 @@ public:
         ESP_LOGI(TAG, "=== FogSeek Nano Alarm Initializing ===");
 
         InitializeI2c();
-        InitializeTca6408a();
         InitializePowerManager();
         InitializeLedController();
         InitializeAudioAmplifier();
-        InitializeDisplayManager();
         InitializeButtonCallbacks();
 
         // 加载持久化闹钟
@@ -1482,16 +1281,14 @@ public:
             esp_timer_stop(alarm_led_timer_);
             esp_timer_delete(alarm_led_timer_);
         }
-        if (tca6408a_handle_.initialized) {
-            tca6408a_deinit(&tca6408a_handle_);
-        }
         if (i2c_bus_) {
             i2c_del_master_bus(i2c_bus_);
         }
     }
 
     virtual Display* GetDisplay() override {
-        return dual_display_;
+        static NoDisplay display;
+        return &display;
     }
 
     virtual AudioCodec* GetAudioCodec() override {

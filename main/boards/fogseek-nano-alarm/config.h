@@ -34,36 +34,4 @@
 #define AUDIO_CODEC_PA_PIN GPIO_NUM_41                    // NS4150B功放使能引脚
 #define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR // ES8389默认I2C地址
 
-// TCA6408A IO扩展器配置
-#define TCA6408A_I2C_ADDRESS 0x20  // TCA6408A I2C地址 (ADDR接地)
-
-// TCA6408A引脚分配（使用枚举值，与tca6408a_io_expander.h保持一致）
-#define TCA6408A_MOTOR_PIN TCA6408A_GPIO_P6  // 电机控制连接到P6 (输出)
-
-// 双眼屏幕
-#define DISPLAY_WIDTH 160
-#define DISPLAY_HEIGHT 160
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_X_1 false
-#define DISPLAY_MIRROR_X_2 false
-#define DISPLAY_MIRROR_Y false
-#define DISPLAY_SWAP_XY false
-#define DISPLAY_OFFSET_X 0
-#define DISPLAY_OFFSET_Y 0
-#define DISPLAY_ROTATION 0
-
-#define LCD_H_RES (160)
-#define LCD_V_RES (160)
-#define LCD_BIT_PER_PIXEL (16)
-#define LCD_HOST SPI2_HOST
-
-// 双眼屏幕 - 原生IO
-#define DISPLAY_SPI_MOSI_GPIO GPIO_NUM_8   // SDA (IO8)
-#define DISPLAY_SPI_SCLK_GPIO GPIO_NUM_7   // SCL (IO7)
-#define DISPLAY_GC9D01_DC_GPIO GPIO_NUM_5  // DC  (IO5)
-#define DISPLAY_SPI_CS_1_GPIO GPIO_NUM_2   // CS1 (IO2)
-#define DISPLAY_SPI_CS_2_GPIO GPIO_NUM_6   // CS2 (IO6)
-#define DISPLAY_GC9D01_RESET_GPIO GPIO_NUM_43 // RST (IO43)
-// 背光由硬件电路控制，无需代码控制
-
 #endif

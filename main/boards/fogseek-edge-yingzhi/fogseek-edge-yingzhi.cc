@@ -46,6 +46,9 @@ private:
     // RGB 模式颜色（由 AI 通过 MCP 工具 self.rgb.set_color 控制）
     StripColor rgb_off_color_ = {0, 0, 0};         // 关闭
 
+    // 运行模式标记
+    bool ai_mode_ = false;        // 开机默认进入蓝牙模式
+
     // AUX 状态标记
     bool aux_inserted_ = false;
 
@@ -174,6 +177,31 @@ private:
         has_pending_cmd_ = false;
     }
 
+    // 根据当前运行模式和设备状态更新 RGB LED 效果
+    // AI 模式用红色，蓝牙模式用蓝色；两种模式都根据设备状态变换灯光效果
+    void UpdateLedByState(DeviceState state) {
+        if (!rgb_led_strip_) return;
+
+        StripColor color = ai_mode_ ? StripColor{255, 0, 0} : StripColor{0, 0, 255};
+
+        switch (state) {
+            case kDeviceStateSpeaking:
+                rgb_led_strip_->Blink(color, 500);      // 说话时闪烁
+                break;
+            case kDeviceStateIdle:
+                rgb_led_strip_->StartBreathe(3000);     // 待命时呼吸灯
+                break;
+            case kDeviceStateListening:
+            case kDeviceStateConnecting:
+                rgb_led_strip_->SetAllColor(color);     // 聆听/连接时常亮
+                break;
+            default:
+                rgb_led_strip_->SetAllColor(color);     // 其他状态常亮
+                break;
+        }
+        rgb_led_on_ = true;
+    }
+
     // 注册状态变化监听器，实时响应唤醒词检测
     void RegisterStateChangeListener() {
         auto& app = Application::GetInstance();
@@ -183,28 +211,26 @@ private:
                 auto& app = Application::GetInstance();
 
                 // ---- 唤醒词检测：仅在唤醒词触发时发送 WAKEUP ----
-                if (!app.IsWakeWordTriggered()) return;
-
-                // 覆盖所有唤醒词触发的状态路径：
-                //   Idle -> Connecting   (首次唤醒，开启音频通道)
-                //   Idle -> Listening    (通道已开，直接监听)
-                //   Speaking -> Listening (打断说话)
-                //   Listening -> Listening(重听)
-                if (new_state == kDeviceStateConnecting || new_state == kDeviceStateListening) {
-                    ESP_LOGI(TAG, "Wake word triggered! state: %d -> %d, scheduling WAKEUP",
-                             (int)old_state, (int)new_state);
-                    app.Schedule([this]() {
-                        SendCommandWithRetry(CMD_WAKEUP);
-                        // 唤醒词触发时同步 RGB 为蓝色（AI 模式）
-                        if (rgb_led_strip_) {
-                            StripColor blue = {0, 0, 255};
-                            rgb_led_strip_->SetAllColor(blue);
-                            rgb_led_on_ = true;
-                        }
-                    });
+                if (app.IsWakeWordTriggered()) {
+                    // 覆盖所有唤醒词触发的状态路径：
+                    //   Idle -> Connecting   (首次唤醒，开启音频通道)
+                    //   Idle -> Listening    (通道已开，直接监听)
+                    //   Speaking -> Listening (打断说话)
+                    //   Listening -> Listening(重听)
+                    if (new_state == kDeviceStateConnecting || new_state == kDeviceStateListening) {
+                        ESP_LOGI(TAG, "Wake word triggered! state: %d -> %d, scheduling WAKEUP",
+                                 (int)old_state, (int)new_state);
+                        ai_mode_ = true;  // 进入 AI 模式
+                        app.Schedule([this]() {
+                            SendCommandWithRetry(CMD_WAKEUP);
+                        });
+                    }
                 }
+
+                // ---- 根据当前状态更新 RGB LED 效果 ----
+                UpdateLedByState(new_state);
             });
-        ESP_LOGI(TAG, "State change listener registered (id=%d) for immediate wake word response",
+        ESP_LOGI(TAG, "State change listener registered (id=%d) for state-based LED control",
                  state_listener_id_);
     }
 
@@ -386,44 +412,40 @@ private:
     void InitializeTools() {
         auto& mcp_server = McpServer::GetInstance();
 
-        // ---- 唤醒/休眠控制 ----
+        // ---- 模式切换 ----
 
-        mcp_server.AddTool("self.ac7065e.wakeup", 
-                           "使 AC7065E 蓝牙音频协处理器进入 AI 语音对话模式，对话模式同样保持蓝牙音乐播放。"
-                           "RGB 灯会自动同步为蓝色（AI模式），无需额外调用 set_color。\n"
-                           "【触发场景】当用户说出以下唤醒词或打招呼词时，请首先调用此工具切换到 AI 对话模式：\n"
-                           "  - \"你好，小智\" / \"你好，小志\" / \"你好小智\" / \"你好小志\"\n"
-                           "  - \"小智小智\" / \"小志小志\"\n"
-                           "  - \"嗨，小智\" / \"嗨，小志\" / \"嘿，小智\" / \"嘿，小志\"\n"
-                           "  - \"小智在吗\" / \"小志在吗\"\n"
-                           "  - 类似的打招呼、呼唤设备名称的语句\n"
-                           "调用此工具后，设备进入 AI 对话模式，随后即可正常与用户进行语音对话。",
+        mcp_server.AddTool("self.ac7065e.switch_to_ai", 
+                           "切换至 AI 语音对话模式。"
+                           "当用户表示想要聊天时，如果在蓝牙模式下，先调用这个工具进入AI语音对话模式，因为只有在AI语音对话模式下，才能进行对话。",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+                               ai_mode_ = true;
                                SendCommandWithRetry(CMD_WAKEUP);
-                               // 自动同步 RGB 为蓝色（AI 模式）
+                               // 自动同步 RGB（AI 模式：红色）
                                if (rgb_led_strip_) {
-                                   StripColor blue = {0, 0, 255};
-                                   rgb_led_strip_->SetAllColor(blue);
+                                   StripColor red = {255, 0, 0};
+                                   rgb_led_strip_->SetAllColor(red);
                                    rgb_led_on_ = true;
-                                   ESP_LOGI(TAG, "MCP: WAKEUP -> OK, RGB set to blue");
+                                   ESP_LOGI(TAG, "MCP: WAKEUP -> OK, RGB set to red (AI mode)");
                                } else {
                                    ESP_LOGI(TAG, "MCP: WAKEUP -> OK");
                                }
                                return true;
                            });
 
-        mcp_server.AddTool("self.ac7065e.sleep", 
-                           "关闭 AI 语音对话模式，切换回蓝牙模式，蓝牙模式同样可以进行指令下发，"
-                           "当用户说退下/再见以及长时间无对话时，在进入待命状态前先切换到蓝牙模式再进入待命。"
-                           "RGB 灯会自动同步为绿色（蓝牙模式），无需额外调用 set_color。",
+        mcp_server.AddTool("self.ac7065e.switch_to_bluetooth", 
+                           "关闭 AI 语音对话模式，切换回蓝牙模式。蓝牙模式下 RGB 灯变为蓝色，同样会根据设备状态变换效果："
+                           "说话时闪烁、待命时呼吸灯、聆听时常亮。"
+                           
+                           "蓝牙模式下同样可以进行音乐播放、音量调节等指令下发。",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+                               ai_mode_ = false;
                                SendCommandWithRetry(CMD_SLEEP);
-                               // 自动同步 RGB 为绿色（蓝牙模式）
+                               // 自动同步 RGB 为蓝色（蓝牙模式）
                                if (rgb_led_strip_) {
-                                   StripColor green = {0, 255, 0};
-                                   rgb_led_strip_->SetAllColor(green);
+                                   StripColor blue = {0, 0, 255};
+                                   rgb_led_strip_->SetAllColor(blue);
                                    rgb_led_on_ = true;
-                                   ESP_LOGI(TAG, "MCP: SLEEP -> OK, RGB set to green");
+                                   ESP_LOGI(TAG, "MCP: SLEEP -> OK, RGB set to blue (BT mode)");
                                } else {
                                    ESP_LOGI(TAG, "MCP: SLEEP -> OK");
                                }
@@ -432,7 +454,13 @@ private:
 
         // ---- 音源切换 ----
 
-        mcp_server.AddTool("self.ac7065e.play", "恢复蓝牙音乐播放，用户的播放音乐命令默认为开启蓝牙音乐播放", PropertyList(),
+        mcp_server.AddTool("self.ac7065e.play", 
+                           "恢复蓝牙音乐播放。\n"
+                           "【重要】用户说\"播放音乐\"、\"播放蓝牙音乐\"、\"放首歌\"等指令时，请按以下两步顺序调用：\n"
+                           "  1. 先调用 self.ac7065e.switch_to_bluetooth 切换到蓝牙模式\n"
+                           "  2. 等待确认切换成功（收到返回 true 后），再调用此工具播放音乐\n"
+                           "不要跳过第一步直接播放，因为 AI 模式下音频通道被占用，无法播放蓝牙音乐。",
+                           PropertyList(),
                            [this](const PropertyList& properties) -> ReturnValue {
                                SendCommandWithRetry(CMD_PLAY);
                                ESP_LOGI(TAG, "MCP: PLAY -> OK");
@@ -542,7 +570,7 @@ private:
         // RGB 灯带 MCP 工具
         // ============================================================
 
-        mcp_server.AddTool("self.rgb.on", "打开 RGB 灯带（需要先调用 self.rgb.set_color 设置颜色，或配合 wakeup/sleep 使用）",
+        mcp_server.AddTool("self.rgb.on", "打开 RGB 灯带（需要先调用 self.rgb.set_color 设置颜色，或配合 switch_to_ai/switch_to_bluetooth 使用）",
                            PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
                                if (!rgb_led_strip_) {
                                    ESP_LOGW(TAG, "RGB LED not initialized");
@@ -690,7 +718,7 @@ private:
         HandleAutoWake();  // 开机自动唤醒
     }
 
-    // 关机流程（蓝牙音箱按键关机触发，不改变 RGB 模式）
+    // 关机流程（蓝牙音箱按键关机触发）
     void PowerOff() {
         // 通知 AC7065E 切换到蓝牙模式
         SendCommandWithRetry(CMD_SLEEP);

@@ -51,34 +51,19 @@
 #define TAG "FogSeekNanoToy"
 
 class DualDisplayEmotionOnly : public Display {
-private:
-    SemaphoreHandle_t mutex_ = nullptr; // 添加互斥锁
-
 public:
     SpiLcdDisplay* display_1_ = nullptr;
     SpiLcdDisplay* display_2_ = nullptr;
 
     DualDisplayEmotionOnly(SpiLcdDisplay* disp1, SpiLcdDisplay* disp2)
-        : display_1_(disp1), display_2_(disp2) {
-            mutex_ = xSemaphoreCreateMutex();
-            if (!mutex_) {
-            ESP_LOGE(TAG, "Failed to create display mutex!");
-        }
-            // if (display_1_ && display_2_) 
-            // {
-            //     display_1_->SetTheme(display_2_->GetTheme());
-            // }
-    }
-    ~DualDisplayEmotionOnly() {
-        if (mutex_) {
-            vSemaphoreDelete(mutex_);
-        }
-    }
-    void SetEmotion(const char* emotion) override {
+        : display_1_(disp1), display_2_(disp2) {}
 
+    void SetEmotion(const char* emotion) override {
+        // Each display's SetEmotion acquires lvgl_port_lock internally via
+        // DisplayLockGuard. We don't hold an extra mutex or yield between
+        // calls — lvgl_port_lock (recursive) serializes all LVGL access.
         if (display_1_) {
             display_1_->SetEmotion(emotion);
-            //vTaskDelay(pdMS_TO_TICKS(100)); 
         }
         if (display_2_) {
             display_2_->SetEmotion(emotion);
@@ -90,17 +75,12 @@ public:
         if (display_2_) display_2_->SetTheme(theme);
     }
 
-public:
     bool Lock(int timeout_ms = 0) override {
-        if (!mutex_) return false;
-        TickType_t ticks = timeout_ms == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-        return xSemaphoreTake(mutex_, ticks) == pdTRUE;
+        return lvgl_port_lock(timeout_ms);
     }
 
     void Unlock() override {
-        if (mutex_) {
-            xSemaphoreGive(mutex_);
-        }
+        lvgl_port_unlock();
     }
 };
 class FogSeekNanoToy : public WifiBoard
@@ -199,8 +179,7 @@ private:
         tca6408a_config_t tca6408a_config = {
             .i2c_bus = i2c_bus_,
             .i2c_address = 0x20,
-            
-            .reset_gpio = GPIO_NUM_5};
+            .reset_gpio = GPIO_NUM_NC};  // GPIO5 已被 DISPLAY_GC9D01_DC_GPIO 占用
 
         esp_err_t ret = tca6408a_init(&tca6408a_handle_, &tca6408a_config);
         if (ret != ESP_OK)
@@ -922,7 +901,7 @@ public:
     FogSeekNanoToy() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
-        InitializeTca6408a();
+        //InitializeTca6408a();
         InitializePowerManager();
         InitializeLedController();
         InitializeAudioAmplifier();
@@ -931,6 +910,8 @@ public:
         InitializeTools();
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
+
+        
     }
 
     virtual Display *GetDisplay() override
