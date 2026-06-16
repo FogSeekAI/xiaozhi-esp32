@@ -25,23 +25,23 @@
 #define AUDIO_CODEC_I2C_SCL_PIN GPIO_NUM_11 // I2C时钟线
 #define AUDIO_CODEC_I2C_SDA_PIN GPIO_NUM_12 // I2C数据线
 
-#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_9 // 主时钟
+#define AUDIO_I2S_GPIO_MCLK GPIO_NUM_38 // 主时钟
 #define AUDIO_I2S_GPIO_BCLK GPIO_NUM_14 // 位时钟
 #define AUDIO_I2S_GPIO_WS GPIO_NUM_16   // 帧时钟
 #define AUDIO_I2S_GPIO_DOUT GPIO_NUM_13 // 数据输出（扬声器）
 #define AUDIO_I2S_GPIO_DIN GPIO_NUM_17  // 数据输入（麦克风）
 
-#define AUDIO_CODEC_PA_PIN GPIO_NUM_38                    // NS4150B功放使能引脚
+#define AUDIO_CODEC_PA_PIN GPIO_NUM_41                    // NS4150B功放使能引脚
 #define AUDIO_CODEC_ES8389_ADDR ES8389_CODEC_DEFAULT_ADDR // ES8389默认I2C地址
 
 // TCA6408A IO扩展器配置
 //#define TCA6408A_I2C_ADDRESS 0x20  // TCA6408A I2C地址 (ADDR接地)
 
-#define I2C_INT_GPIO GPIO_NUM_5 // 中断
+
 // TCA6408A引脚分配（使用枚举值，与tca6408a_io_expander.h保持一致）
 #define RADAR_PIN GPIO_NUM_45  // 雷达传感器连接到P3 (输入)
 #define MOTOR_PIN GPIO_NUM_3  // 电机控制连接到P6 (输出)
-#define TOUCH_PIN GPIO_NUM_41  // 触摸传感器连接到P7 (输入)
+#define TOUCH_PIN GPIO_NUM_9  // 触摸传感器连接到P7 (输入)
 
 // 配置掩码：P3、P7为输入(1)，P6为输出(0)，其他保持输入(1)
 // 二进制: 1 1 0 1 1 1 1 1 = 0xDF
@@ -70,7 +70,7 @@
 #define DISPLAY_SPI_MOSI_GPIO GPIO_NUM_8
 #define DISPLAY_SPI_SCLK_GPIO GPIO_NUM_7  // SCL
 #define DISPLAY_GC9D01_DC_GPIO GPIO_NUM_5   // DC
-#define DISPLAY_GC9D01_RESET_GPIO GPIO_NUM_40 // RST
+#define DISPLAY_GC9D01_RESET_GPIO GPIO_NUM_43 // RST
 
 
 
