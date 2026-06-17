@@ -751,6 +751,60 @@ public:
         return &audio_codec;
     }
 
+    // 处理语音命令（本地执行，不走 AI 模型，保证快速准确）
+    // command_id 对应 Kconfig 中的 CN_SPEECH_COMMAND_ID<n> 配置槽位
+    void OnSpeechCommand(int command_id) override {
+        ESP_LOGI(TAG, "Speech command: id=%d", command_id);
+        
+        switch (command_id) {
+            case 0: // 蓝牙模式
+                ai_mode_ = false;
+                SendCommandWithRetry(CMD_SLEEP);
+                if (rgb_led_strip_) {
+                    rgb_led_strip_->SetAllColor({0, 0, 255});
+                    rgb_led_on_ = true;
+                }
+                ESP_LOGI(TAG, "VC: switch_bluetooth -> SLEEP, RGB blue");
+                break;
+            case 1: // 对话模式
+                ai_mode_ = true;
+                SendCommandWithRetry(CMD_WAKEUP);
+                if (rgb_led_strip_) {
+                    rgb_led_strip_->SetAllColor({255, 0, 0});
+                    rgb_led_on_ = true;
+                }
+                ESP_LOGI(TAG, "VC: switch_ai -> WAKEUP, RGB red");
+                break;
+            case 2: // 增大音量
+                SendCommandWithRetry(CMD_VOL_UP);
+                ESP_LOGI(TAG, "VC: vol_up");
+                break;
+            case 3: // 减小音量
+                SendCommandWithRetry(CMD_VOL_DOWN);
+                ESP_LOGI(TAG, "VC: vol_down");
+                break;
+            case 4: // 下一首
+                SendCommandWithRetry(CMD_NEXT_TRACK);
+                ESP_LOGI(TAG, "VC: next_track");
+                break;
+            case 5: // 上一首
+                SendCommandWithRetry(CMD_PREV_TRACK);
+                ESP_LOGI(TAG, "VC: prev_track");
+                break;
+            case 6: // 播放音乐
+                SendCommandWithRetry(CMD_PLAY);
+                ESP_LOGI(TAG, "VC: play");
+                break;
+            case 7: // 暂停音乐
+                SendCommandWithRetry(CMD_PAUSE);
+                ESP_LOGI(TAG, "VC: pause");
+                break;
+            default:
+                ESP_LOGW(TAG, "Unknown speech command id: %d", command_id);
+                break;
+        }
+    }
+
     ~FogSeekEdgeYingZhi() {
         CancelPendingRetry();
         if (query_semaphore_) {

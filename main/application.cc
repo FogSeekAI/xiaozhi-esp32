@@ -83,6 +83,11 @@ void Application::Initialize() {
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
+    callbacks.on_speech_command = [this](int command_id) {
+        Schedule([command_id]() {
+            Board::GetInstance().OnSpeechCommand(command_id);
+        });
+    };
     audio_service_.SetCallbacks(callbacks);
 
     // Add state change listeners

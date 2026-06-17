@@ -903,6 +903,190 @@ config WAKE_WORD_DETECTION_IN_LISTENING
         which allows interrupting the current conversation.
         When disabled (default), wake word detection is turned off during listening.
 
+menu "Chinese Speech Commands"
+    depends on USE_CUSTOM_WAKE_WORD
+
+    config USE_CN_SPEECH_COMMANDS
+        bool "Enable Chinese Speech Commands"
+        default n
+        help
+            Enable Chinese speech command recognition (Multinet model).
+            When enabled, you can configure up to 20 voice commands using pinyin.
+            Each command has a fixed ID (0-19) that board code uses to dispatch actions.
+            
+            Usage in board file:
+              void OnSpeechCommand(int command_id) override {
+                  switch (command_id) {
+                      case 0: /* handle command 0 */ break;
+                      case 1: /* handle command 1 */ break;
+                      ...
+                  }
+              }
+
+    config CN_SPEECH_COMMAND_ID0
+        string "  Command ID0 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=0 (e.g. "lan ya mo shi").
+            Leave empty to disable this command slot.
+            Board handles this ID in OnSpeechCommand(0).
+
+    config CN_SPEECH_COMMAND_ID1
+        string "  Command ID1 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=1 (e.g. "dui hua mo shi").
+            Leave empty to disable this command slot.
+            Board handles this ID in OnSpeechCommand(1).
+
+    config CN_SPEECH_COMMAND_ID2
+        string "  Command ID2 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=2.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID3
+        string "  Command ID3 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=3.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID4
+        string "  Command ID4 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=4.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID5
+        string "  Command ID5 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=5.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID6
+        string "  Command ID6 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=6.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID7
+        string "  Command ID7 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=7.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID8
+        string "  Command ID8 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=8.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID9
+        string "  Command ID9 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=9.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID10
+        string "  Command ID10 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=10.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID11
+        string "  Command ID11 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=11.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID12
+        string "  Command ID12 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=12.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID13
+        string "  Command ID13 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=13.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID14
+        string "  Command ID14 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=14.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID15
+        string "  Command ID15 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=15.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID16
+        string "  Command ID16 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=16.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID17
+        string "  Command ID17 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=17.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID18
+        string "  Command ID18 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=18.
+            Leave empty to disable.
+
+    config CN_SPEECH_COMMAND_ID19
+        string "  Command ID19 (pinyin)"
+        default ""
+        depends on USE_CN_SPEECH_COMMANDS
+        help
+            Pinyin for speech command ID=19.
+            Leave empty to disable.
+
+endmenu
+
 config USE_AUDIO_PROCESSOR
     bool "Enable Audio Noise Reduction"
     default y
