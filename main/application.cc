@@ -68,22 +68,26 @@ void Application::Initialize() {
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
 
-    // Setup the audio service
+    // Setup the audio service (skip if no audio codec available, e.g. offline-only boards)
     auto codec = board.GetAudioCodec();
-    audio_service_.Initialize(codec);
-    audio_service_.Start();
+    if (codec != nullptr) {
+        audio_service_.Initialize(codec);
+        audio_service_.Start();
 
-    AudioServiceCallbacks callbacks;
-    callbacks.on_send_queue_available = [this]() {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
-    };
-    callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
-    };
-    callbacks.on_vad_change = [this](bool speaking) {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
-    };
-    audio_service_.SetCallbacks(callbacks);
+        AudioServiceCallbacks callbacks;
+        callbacks.on_send_queue_available = [this]() {
+            xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
+        };
+        callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
+            xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
+        };
+        callbacks.on_vad_change = [this](bool speaking) {
+            xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
+        };
+        audio_service_.SetCallbacks(callbacks);
+    } else {
+        ESP_LOGW(TAG, "No audio codec available, audio service disabled");
+    }
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
@@ -503,7 +507,7 @@ void Application::InitializeProtocol() {
     
     protocol_->OnAudioChannelOpened([this, codec, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
-        if (protocol_->server_sample_rate() != codec->output_sample_rate()) {
+        if (codec && protocol_->server_sample_rate() != codec->output_sample_rate()) {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }

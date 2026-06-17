@@ -101,6 +101,9 @@ set(BUILTIN_ICON_FONT font_awesome_14_1)
 
 set(EMOTE_RESOLUTION "320_240")
 
+# Board-specific embedded files (e.g., GIFs for offline boards)
+set(BOARD_EMBED_FILES "")
+
 # Add board files according to BOARD_TYPE
 # Set default assets if the board uses partition table V2
 if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
@@ -993,6 +996,12 @@ elseif(CONFIG_BOARD_TYPE_FOGSEEK_NANO_TOY_2)
     set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
     set(BUILTIN_ICON_FONT font_awesome_16_4)
     set(DEFAULT_EMOJI_COLLECTION twemoji_32)
+elseif(CONFIG_BOARD_TYPE_FOGSEEK_NANO_TOY_SIMPLE)
+    set(BOARD_TYPE "fogseek-nano-toy-simple")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
+    set(BUILTIN_ICON_FONT font_awesome_16_4)
+    # No DEFAULT_EMOJI_COLLECTION: use local GIFs as embedded data
+    file(GLOB BOARD_EMBED_FILES ${CMAKE_CURRENT_SOURCE_DIR}/boards/fogseek-nano-toy-simple/*.gif)
 elseif(CONFIG_BOARD_TYPE_FOGSEEK_NANO_ANGEL)
     set(BOARD_TYPE "fogseek-nano-angel")
     set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
@@ -1191,7 +1200,7 @@ endif()
 
 idf_component_register(SRCS ${SOURCES}
                             "boards/esp_lcd_panel_io_spi_expander/esp_lcd_panel_io_spi_expander.cc"
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${BOARD_EMBED_FILES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                                     "boards/esp_lcd_panel_io_spi_expander"
                     WHOLE_ARCHIVE

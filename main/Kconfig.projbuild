@@ -270,6 +270,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_FOGSEEK_NANO_TOY_2
         bool "Nano Toy 2"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_FOGSEEK_NANO_TOY_SIMPLE
+        bool "Nano Toy Simple (Offline)"
+        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_FOGSEEK_NANO_ANGEL
         bool "NANO Angel"
         depends on IDF_TARGET_ESP32S3   
