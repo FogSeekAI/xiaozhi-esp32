@@ -64,7 +64,14 @@ public:
     void Run();
 
     DeviceState GetDeviceState() const { return state_machine_.GetState(); }
+    DeviceStateMachine& GetStateMachine() { return state_machine_; }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
+    
+    /**
+     * Check if wake word was recently triggered
+     * Used by board to determine if state transition to Listening is wake-word-driven
+     */
+    bool IsWakeWordTriggered() const { return wake_word_triggered_; }
     
     /**
      * Request state transition
@@ -140,6 +147,7 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    bool wake_word_triggered_ = false;       // Flag: wake word was detected, set by HandleWakeWordDetectedEvent
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 

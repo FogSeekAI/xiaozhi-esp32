@@ -795,6 +795,9 @@ void Application::HandleWakeWordDetectedEvent() {
     auto wake_word = audio_service_.GetLastWakeWord();
     ESP_LOGI(TAG, "Wake word detected: %s (state: %d)", wake_word.c_str(), (int)state);
 
+    // Mark wake word as triggered so board listener can react
+    wake_word_triggered_ = true;
+
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
         auto wake_word = audio_service_.GetLastWakeWord();
@@ -874,6 +877,7 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
+            wake_word_triggered_ = false;  // Clear wake word flag when exiting conversation
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
@@ -881,11 +885,13 @@ void Application::HandleStateChangedEvent() {
             audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateConnecting:
+            wake_word_triggered_ = false;  // Wake word already handled, clear before Connecting->Listening transition
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
             break;
         case kDeviceStateListening:
+            wake_word_triggered_ = false;  // Wake word handled, clear to prevent normal speaking->listening from retriggering
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
 

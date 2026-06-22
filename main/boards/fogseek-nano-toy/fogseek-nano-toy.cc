@@ -36,12 +36,12 @@
 #include <esp_lcd_io_spi.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_io_additions.h>
-#include "../esp_lcd_panel_io_spi_expander/esp_lcd_panel_io_spi_expander.h"
+// 已改用原生SPI，不再使用IO扩展器SPI
 #include "board.h"
 #include "display/lcd_display.h"
 #include "lvgl_theme.h"
 #include "settings.h"
-#include "backlight.h"
+// 背光由硬件控制，不再需要backlight
 #include "assets.h"
 #include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
 #include <sstream>
@@ -51,34 +51,19 @@
 #define TAG "FogSeekNanoToy"
 
 class DualDisplayEmotionOnly : public Display {
-private:
-    SemaphoreHandle_t mutex_ = nullptr; // 添加互斥锁
-
 public:
     SpiLcdDisplay* display_1_ = nullptr;
     SpiLcdDisplay* display_2_ = nullptr;
 
     DualDisplayEmotionOnly(SpiLcdDisplay* disp1, SpiLcdDisplay* disp2)
-        : display_1_(disp1), display_2_(disp2) {
-            mutex_ = xSemaphoreCreateMutex();
-            if (!mutex_) {
-            ESP_LOGE(TAG, "Failed to create display mutex!");
-        }
-            // if (display_1_ && display_2_) 
-            // {
-            //     display_1_->SetTheme(display_2_->GetTheme());
-            // }
-    }
-    ~DualDisplayEmotionOnly() {
-        if (mutex_) {
-            vSemaphoreDelete(mutex_);
-        }
-    }
-    void SetEmotion(const char* emotion) override {
+        : display_1_(disp1), display_2_(disp2) {}
 
+    void SetEmotion(const char* emotion) override {
+        // Each display's SetEmotion acquires lvgl_port_lock internally via
+        // DisplayLockGuard. We don't hold an extra mutex or yield between
+        // calls — lvgl_port_lock (recursive) serializes all LVGL access.
         if (display_1_) {
             display_1_->SetEmotion(emotion);
-            //vTaskDelay(pdMS_TO_TICKS(100)); 
         }
         if (display_2_) {
             display_2_->SetEmotion(emotion);
@@ -90,17 +75,12 @@ public:
         if (display_2_) display_2_->SetTheme(theme);
     }
 
-public:
     bool Lock(int timeout_ms = 0) override {
-        if (!mutex_) return false;
-        TickType_t ticks = timeout_ms == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeout_ms);
-        return xSemaphoreTake(mutex_, ticks) == pdTRUE;
+        return lvgl_port_lock(timeout_ms);
     }
 
     void Unlock() override {
-        if (mutex_) {
-            xSemaphoreGive(mutex_);
-        }
+        lvgl_port_unlock();
     }
 };
 class FogSeekNanoToy : public WifiBoard
@@ -199,8 +179,7 @@ private:
         tca6408a_config_t tca6408a_config = {
             .i2c_bus = i2c_bus_,
             .i2c_address = 0x20,
-            
-            .reset_gpio = GPIO_NUM_5};
+            .reset_gpio = GPIO_NUM_NC};  // GPIO5 已被 DISPLAY_GC9D01_DC_GPIO 占用
 
         esp_err_t ret = tca6408a_init(&tca6408a_handle_, &tca6408a_config);
         if (ret != ESP_OK)
@@ -214,7 +193,7 @@ private:
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P3, TCA6408A_DIR_INPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P6, TCA6408A_DIR_OUTPUT);
         tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P7, TCA6408A_DIR_INPUT);
-        tca6408a_set_gpio_direction(&tca6408a_handle_, TCA6408A_GPIO_P0, TCA6408A_DIR_OUTPUT);
+        // P0 不再用于背光（背光由硬件电路控制）
         tca6408a_set_gpio_level(&tca6408a_handle_, TCA6408A_GPIO_P6, 0);
         
         ESP_LOGI(TAG, "Tca6408a initialized successfully");
@@ -384,19 +363,15 @@ private:
             buscfg.max_transfer_sz = DISPLAY_WIDTH * DISPLAY_HEIGHT * sizeof(uint16_t);
         ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-        esp_lcd_panel_io_spi_expander_config_t io_config_1 = {
-            .pclk_hz = 40 * 1000 * 1000,
-            .spi_mode = 0,
-            .trans_queue_depth = 10,
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
-            .dc_gpio_num = DISPLAY_GC9D01_DC_GPIO,
-            .cs_expander_pin = DISPLAY_SPI_CS_1_GPIO,
-            .bl_pin = DISPLAY_GC9D01_BL_GPIO,
-            .bl_use_expander = true,
-            .expander_handle = &tca6408a_handle_,
-        };
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi_expander(SPI2_HOST, &io_config_1, &panel_io_1));
+        esp_lcd_panel_io_spi_config_t io_config_1 = {};
+        io_config_1.cs_gpio_num = DISPLAY_SPI_CS_1_GPIO;
+        io_config_1.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
+        io_config_1.spi_mode = 0;
+        io_config_1.pclk_hz = 40 * 1000 * 1000;
+        io_config_1.trans_queue_depth = 10;
+        io_config_1.lcd_cmd_bits = 8;
+        io_config_1.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_1, &panel_io_1));
 
 
         esp_lcd_panel_dev_config_t panel_config_1 = {};
@@ -414,19 +389,15 @@ private:
                                     DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
                                     DISPLAY_MIRROR_X_1, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
         
-        esp_lcd_panel_io_spi_expander_config_t io_config_2 = {
-            .pclk_hz = 40 * 1000 * 1000,
-            .spi_mode = 0,
-            .trans_queue_depth = 10,
-            .lcd_cmd_bits = 8,
-            .lcd_param_bits = 8,
-            .dc_gpio_num = DISPLAY_GC9D01_DC_GPIO,
-            .cs_expander_pin = DISPLAY_SPI_CS_2_GPIO,
-            .bl_pin = DISPLAY_GC9D01_BL_GPIO,
-            .bl_use_expander = true,
-            .expander_handle = &tca6408a_handle_,
-        };
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi_expander(SPI2_HOST, &io_config_2, &panel_io_2));
+        esp_lcd_panel_io_spi_config_t io_config_2 = {};
+        io_config_2.cs_gpio_num = DISPLAY_SPI_CS_2_GPIO;
+        io_config_2.dc_gpio_num = DISPLAY_GC9D01_DC_GPIO;
+        io_config_2.spi_mode = 0;
+        io_config_2.pclk_hz = 40 * 1000 * 1000;
+        io_config_2.trans_queue_depth = 10;
+        io_config_2.lcd_cmd_bits = 8;
+        io_config_2.lcd_param_bits = 8;
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config_2, &panel_io_2));
 
 
         esp_lcd_panel_dev_config_t panel_config_2 = {};
@@ -448,7 +419,7 @@ private:
         if (display_1 != nullptr && display_2 != nullptr) {
             dual_display_ = new DualDisplayEmotionOnly(display_1, display_2);
         }
-        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO, 1);
+        // 背光由硬件电路控制，无需代码控制
     }
 
 
@@ -909,7 +880,6 @@ private:
 
         ESP_LOGI(TAG, "Device powered on.");
 
-        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO, 0);
         StartSensorMonitoring();
 
         HandleAutoWake();
@@ -922,7 +892,6 @@ private:
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
 
-        tca6408a_set_gpio_level(&tca6408a_handle_, DISPLAY_GC9D01_BL_GPIO,1);
         Application::GetInstance().SetDeviceState(DeviceState::kDeviceStateIdle);
 
         ESP_LOGI(TAG, "Device powered off.");
@@ -932,7 +901,7 @@ public:
     FogSeekNanoToy() : boot_button_(BOOT_BUTTON_GPIO), ctrl_button_(CTRL_BUTTON_GPIO)
     {
         InitializeI2c();
-        InitializeTca6408a();
+        //InitializeTca6408a();
         InitializePowerManager();
         InitializeLedController();
         InitializeAudioAmplifier();
@@ -941,6 +910,8 @@ public:
         InitializeTools();
         power_manager_.SetPowerStateCallback([this](FogSeekPowerManager::PowerState state)
                                              { led_controller_.UpdateLedStatus(power_manager_); });
+
+        
     }
 
     virtual Display *GetDisplay() override

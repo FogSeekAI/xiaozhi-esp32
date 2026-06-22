@@ -758,6 +758,11 @@ void AudioService::SetModelsList(srmodel_list_t* models_list) {
                 callbacks_.on_wake_word_detected(wake_word);
             }
         });
+        wake_word_->OnSpeechCommandDetected([this](int command_id) {
+            if (callbacks_.on_speech_command) {
+                callbacks_.on_speech_command(command_id);
+            }
+        });
     }
 }
 

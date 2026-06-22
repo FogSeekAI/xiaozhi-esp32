@@ -3,6 +3,8 @@
 #include "system_info.h"
 #include "assets.h"
 
+#include <algorithm>
+#include <cstring>
 #include <esp_log.h>
 #include <esp_mn_iface.h>
 #include <esp_mn_models.h>
@@ -71,8 +73,8 @@ void CustomWakeWord::ParseWakenetModelConfig() {
                     cJSON* text = cJSON_GetObjectItem(command, "text");
                     cJSON* action = cJSON_GetObjectItem(command, "action");
                     if (cJSON_IsString(command_name) && cJSON_IsString(text) && cJSON_IsString(action)) {
-                        commands_.push_back({command_name->valuestring, text->valuestring, action->valuestring});
-                        ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s", command_name->valuestring, text->valuestring, action->valuestring);
+                        commands_.push_back({command_name->valuestring, -1}); // id=-1 = wake word
+                        ESP_LOGI(TAG, "Wake word: %s, Text: %s", command_name->valuestring, text->valuestring);
                     }
                 }
             }
@@ -91,12 +93,42 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         models_ = esp_srmodel_init("model");
 #ifdef CONFIG_CUSTOM_WAKE_WORD
         threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
-        commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake"});
+        commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, -1}); // id=-1 = wake word
 #endif
     } else {
         models_ = models_list;
         ParseWakenetModelConfig();
     }
+
+    // 追加 Kconfig 中配置的语音命令词（仅 master 开关启用时生效）
+    // 每条命令的 ID 由 Kconfig 槽位号决定（0-19），空字符串=不启用
+    #ifdef CONFIG_USE_CN_SPEECH_COMMANDS
+    #define REGISTER_SPEECH_COMMAND(n) \
+        if (strlen(CONFIG_CN_SPEECH_COMMAND_ID##n) > 0) { \
+            commands_.push_back({CONFIG_CN_SPEECH_COMMAND_ID##n, n}); \
+        }
+    REGISTER_SPEECH_COMMAND(0)
+    REGISTER_SPEECH_COMMAND(1)
+    REGISTER_SPEECH_COMMAND(2)
+    REGISTER_SPEECH_COMMAND(3)
+    REGISTER_SPEECH_COMMAND(4)
+    REGISTER_SPEECH_COMMAND(5)
+    REGISTER_SPEECH_COMMAND(6)
+    REGISTER_SPEECH_COMMAND(7)
+    REGISTER_SPEECH_COMMAND(8)
+    REGISTER_SPEECH_COMMAND(9)
+    REGISTER_SPEECH_COMMAND(10)
+    REGISTER_SPEECH_COMMAND(11)
+    REGISTER_SPEECH_COMMAND(12)
+    REGISTER_SPEECH_COMMAND(13)
+    REGISTER_SPEECH_COMMAND(14)
+    REGISTER_SPEECH_COMMAND(15)
+    REGISTER_SPEECH_COMMAND(16)
+    REGISTER_SPEECH_COMMAND(17)
+    REGISTER_SPEECH_COMMAND(18)
+    REGISTER_SPEECH_COMMAND(19)
+    #undef REGISTER_SPEECH_COMMAND
+    #endif
 
     if (models_ == nullptr || models_->num == -1) {
         ESP_LOGE(TAG, "Failed to initialize wakenet model");
@@ -130,6 +162,10 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
 
 void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback) {
     wake_word_detected_callback_ = callback;
+}
+
+void CustomWakeWord::OnSpeechCommandDetected(std::function<void(int command_id)> callback) {
+    speech_command_callback_ = callback;
 }
 
 void CustomWakeWord::Start() {
@@ -173,16 +209,42 @@ void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
         if (mn_state == ESP_MN_STATE_DETECTED) {
             esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
             for (int i = 0; i < mn_result->num && running_; i++) {
-                ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
+                ESP_LOGI(TAG, "Detected: command_id=%d, string=%s, prob=%f", 
                         mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
-                auto& command = commands_[mn_result->command_id[i] - 1];
-                if (command.action == "wake") {
-                    last_detected_wake_word_ = command.text;
+                // 用字符串前缀匹配代替 command_id 索引，避免 Multinet 截断/重排导致错位
+                std::string detected_str = mn_result->string;
+                detected_str.erase(std::remove(detected_str.begin(), detected_str.end(), ' '), detected_str.end());
+                
+                Command* matched = nullptr;
+                for (int j = 0; j < commands_.size(); j++) {
+                    std::string cmd_str = commands_[j].command;
+                    cmd_str.erase(std::remove(cmd_str.begin(), cmd_str.end(), ' '), cmd_str.end());
+                    if (cmd_str == detected_str || cmd_str.find(detected_str) == 0 || detected_str.find(cmd_str) == 0) {
+                        matched = &commands_[j];
+                        break;
+                    }
+                }
+                
+                if (matched == nullptr) {
+                    ESP_LOGW(TAG, "No matching command for: %s", mn_result->string);
+                    continue;
+                }
+                
+                if (matched->id < 0) {
+                    // 唤醒词 (id=-1)：停止识别，发起对话
+                    last_detected_wake_word_ = matched->command;
                     running_ = false;
                     input_buffer_.clear();
                     
                     if (wake_word_detected_callback_) {
                         wake_word_detected_callback_(last_detected_wake_word_);
+                    }
+                } else {
+                    // 语音命令 (id>=0)：不停止检测，回调 Kconfig 命令 ID
+                    ESP_LOGI(TAG, "Speech command: Kconfig ID=%d, pinyin=%s", 
+                             matched->id, matched->command.c_str());
+                    if (speech_command_callback_) {
+                        speech_command_callback_(matched->id);
                     }
                 }
             }

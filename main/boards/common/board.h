@@ -86,6 +86,7 @@ public:
     // 添加消息通知虚函数（默认空实现）
     virtual void OnChatMessageReceived(const std::string& role, const std::string& content) {}
     virtual void OnEmotionReceived(const std::string& emotion) {}
+    virtual void OnSpeechCommand(int command_id) {}
 
 };
 
