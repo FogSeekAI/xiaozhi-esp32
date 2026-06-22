@@ -77,26 +77,23 @@ private:
     void InitializeDisplayManager()
     {
         lcd_pin_config_t lcd_pin_config = {
-            // SPI通信接口
-            .spi_mosi_gpio = DISPLAY_SPI_MOSI_GPIO, // MOSI引脚
-            .spi_sclk_gpio = DISPLAY_SPI_SCLK_GPIO, // SCLK引脚
-            .spi_cs_gpio = DISPLAY_SPI_CS_GPIO,     // CS引脚
 
-            // ST7789面板驱动接口
-            .st7789_dc_gpio = DISPLAY_ST7789_DC_GPIO,       // DC引脚
-            .st7789_reset_gpio = DISPLAY_ST7789_RESET_GPIO, // RESET引脚
-            .st7789_bl_gpio = DISPLAY_ST7789_BL_GPIO,       // 背光引脚
-
-            // 通用面板特性配置
-            .width = DISPLAY_WIDTH,
-            .height = DISPLAY_HEIGHT,
+            lcd_pin_config_t lcd_pin_config = {
+            .spi_mosi_gpio = DISPLAY_SPI_MOSI_GPIO,
+            .spi_sclk_gpio = DISPLAY_SPI_SCLK_GPIO,
+            .spi_cs_gpio = DISPLAY_SPI_CS_GPIO,
+            .spi_dc_gpio = LCD_DC_GPIO,
+            .spi_reset_gpio = LCD_RESET_GPIO,
+            .spi_bl_gpio = LCD_BL_GPIO,
+            .width = LCD_H_RES,
+            .height = LCD_V_RES,
             .offset_x = DISPLAY_OFFSET_X,
             .offset_y = DISPLAY_OFFSET_Y,
             .mirror_x = DISPLAY_MIRROR_X,
             .mirror_y = DISPLAY_MIRROR_Y,
             .swap_xy = DISPLAY_SWAP_XY,
-            .rotation = DISPLAY_ROTATION};
-
+            .rotation=DISPLAY_ROTATION,
+        };
         display_manager_.Initialize(BOARD_LCD_TYPE, &lcd_pin_config);
     }
 

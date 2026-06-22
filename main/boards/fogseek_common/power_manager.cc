@@ -177,8 +177,17 @@ void FogSeekPowerManager::CheckLowBattery()
 {
     // 读取最新的电池电量
     battery_level_ = ReadBatteryLevel();
-
-    if (power_state_ == PowerState::BATTERY_POWER || power_state_ == PowerState::LOW_BATTERY)
+    bool is_usb_powered = (power_state_ == PowerState::USB_POWER_CHARGING || 
+                          power_state_ == PowerState::USB_POWER_DONE || 
+                          power_state_ == PowerState::USB_POWER_NO_BATTERY);
+    if (is_usb_powered)
+    {
+        // USB供电时重置标志，不发出低电量警告
+        low_battery_warning_ = false;
+        low_battery_shutdown_ = false;
+        ESP_LOGI(TAG, "USB powered, skipping low battery check");
+    }
+    else if (power_state_ == PowerState::BATTERY_POWER || power_state_ == PowerState::LOW_BATTERY)
     {
         // 低于40%自动关机，电池映射表1对应3.72V
         if (battery_level_ < 40 && !low_battery_shutdown_)

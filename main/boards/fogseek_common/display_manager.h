@@ -15,7 +15,9 @@ typedef enum
     DISPLAY_TYPE_JYC_1_5_INCH,  // 金逸晨1.5英寸屏幕 (ST77916+QSPI+特殊初始化序列)
     DISPLAY_TYPE_HXC_1_8_INCH,  // 华夏彩1.8英寸屏幕 (ST77916+QSPI+特殊初始化序列)
     DISPLAY_TYPE_HXC_1_15_INCH, // 华夏彩1.15英寸屏幕(ST7789+SPI+使用标准库无需初始化序列)
-    DISPLAY_TYPE_JYC_0_71_INCH  // 金逸晨0.71英寸屏幕(GC9D01+SPI+使用标准库无需初始化序列)
+    DISPLAY_TYPE_JYC_0_71_INCH, // 金逸晨0.71英寸屏幕(GC9D01+SPI+使用标准库无需初始化序列)
+    DISPLAY_TYPE_JYC_2_01_INCH, // 金逸晨2.01英寸屏幕(JD9853+SPI+需初始化序列)
+    DISPLAY_TYPE_NANO_2_4_INCH  // Nano 2.4英寸屏幕 (ST7789+SPI+240x320)
 } lcd_type_t;
 
 // 通信方式枚举
@@ -30,7 +32,8 @@ typedef enum
 {
     DRIVER_ST7789,
     DRIVER_ST77916,
-    DRIVER_GC9D01
+    DRIVER_GC9D01,
+    DRIVER_JD9853
 } driver_type_t;
 
 // 屏幕配置项结构

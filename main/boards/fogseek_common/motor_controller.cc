@@ -6,10 +6,10 @@
 
 #define TAG "FogSeekMotorController"
 
-FogSeekMotorController::FogSeekMotorController() : timer_(LEDC_TIMER_0), 
+FogSeekMotorController::FogSeekMotorController() : timer_(LEDC_TIMER_0),
                                                    timer_initialized_(false),
                                                    motor_gpio_(GPIO_NUM_NC),
-                                                   motor_initialized_(false), 
+                                                   motor_initialized_(false),
                                                    motor_timer_handle_(nullptr),
                                                    run_time_ms_(0) {}
 
@@ -76,10 +76,9 @@ void FogSeekMotorController::InitializeServo(ServoId id, gpio_num_t servo_gpio, 
     config.initialized = true;
     
     // 设置初始角度
-    SetAngle(id, config.current_angle);
-    
-    ESP_LOGI(TAG, "Servo %d initialized on GPIO %d (duty range: %lu-%lu)", 
-             id, config.gpio, config.min_duty, config.max_duty);
+    SetAngle(id, 90);
+
+    ESP_LOGI(TAG, "Servo %d initialized on GPIO %d", id, servo_gpio);
 }
 
 void FogSeekMotorController::SetAngle(ServoId id, uint16_t angle)
@@ -127,20 +126,6 @@ uint16_t FogSeekMotorController::GetAngle(ServoId id) const
     return it->second.current_angle;
 }
 
-bool FogSeekMotorController::IsServoInitialized(ServoId id) const
-{
-    if (id >= SERVO_MAX) {
-        return false;
-    }
-    
-    auto it = servos_.find(id);
-    if (it == servos_.end()) {
-        return false;
-    }
-    
-    return it->second.initialized;
-}
-
 void FogSeekMotorController::InitializeMotor(gpio_num_t motor_gpio)
 {
     motor_gpio_ = motor_gpio;
@@ -159,7 +144,7 @@ void FogSeekMotorController::InitializeMotor(gpio_num_t motor_gpio)
     
     motor_initialized_ = true;
     
-    ESP_LOGI(TAG, "Motor controller initialized on GPIO %d", motor_gpio_);
+    // ESP_LOGI(TAG, "Motor controller initialized on GPIO %d", motor_gpio_);
 }
 
 void FogSeekMotorController::ControlMotor(bool state)

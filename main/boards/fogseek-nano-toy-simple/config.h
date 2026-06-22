@@ -1,0 +1,50 @@
+#ifndef _BOARD_CONFIG_H_
+#define _BOARD_CONFIG_H_
+
+#include <driver/gpio.h>
+
+// 按钮相关配置
+#define BOOT_BUTTON_GPIO GPIO_NUM_0
+#define CTRL_BUTTON_GPIO GPIO_NUM_18
+
+// 电源相关配置
+#define PWR_HOLD_GPIO GPIO_NUM_39
+#define PWR_CHARGE_DONE_GPIO GPIO_NUM_21
+#define PWR_CHARGING_GPIO GPIO_NUM_15
+#define BATTERY_ADC_GPIO GPIO_NUM_10 // 电池电压检测ADC1_CH9
+
+// LED相关配置
+#define LED_RED_GPIO GPIO_NUM_48
+#define LED_GREEN_GPIO GPIO_NUM_47
+
+// 触摸传感器
+#define TOUCH_PIN GPIO_NUM_9
+
+// 电机控制
+#define MOTOR_PIN GPIO_NUM_3
+
+// 双眼屏幕 GC9D01N (SPI)
+#define DISPLAY_WIDTH 160
+#define DISPLAY_HEIGHT 160
+#define DISPLAY_MIRROR_X true
+#define DISPLAY_MIRROR_X_1 false
+#define DISPLAY_MIRROR_X_2 true
+#define DISPLAY_MIRROR_Y false
+#define DISPLAY_SWAP_XY false
+#define DISPLAY_OFFSET_X 0
+#define DISPLAY_OFFSET_Y 0
+
+#define LCD_H_RES (160)
+#define LCD_V_RES (160)
+#define LCD_BIT_PER_PIXEL (16)
+#define LCD_HOST SPI2_HOST
+
+#define DISPLAY_SPI_CS_1_GPIO GPIO_NUM_2   // 左眼 CS1
+#define DISPLAY_SPI_CS_2_GPIO GPIO_NUM_6   // 右眼 CS2
+#define DISPLAY_GC9D01_BL_GPIO GPIO_NUM_1  // 背光
+#define DISPLAY_SPI_MOSI_GPIO GPIO_NUM_8   // MOSI
+#define DISPLAY_SPI_SCLK_GPIO GPIO_NUM_7   // SCL
+#define DISPLAY_GC9D01_DC_GPIO GPIO_NUM_5  // DC
+#define DISPLAY_GC9D01_RESET_GPIO GPIO_NUM_43 // RST
+
+#endif

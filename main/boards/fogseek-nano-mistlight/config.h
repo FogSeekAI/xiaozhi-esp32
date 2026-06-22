@@ -41,6 +41,5 @@
 // 舵机相关配置
 #define SERVO_BODY_GPIO GPIO_NUM_5
 
-//电机相关配置
-#define MOTOR_GPIO GPIO_NUM_44
+#define MOTOR_GPIO GPIO_NUM_5
 #endif

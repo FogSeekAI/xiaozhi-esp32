@@ -132,37 +132,37 @@ private:
     {
         ctrl_button_.OnClick([this]()
                              {
-                                 //servo_controller_.SetAngle(45);
-                                 // 延时500ms后返回到90度位置
-                                 vTaskDelay(pdMS_TO_TICKS(500));
-                                 //servo_controller_.SetAngle(90);
-                                 // 循环切换RGB灯带颜色
-                                 static int color_index = 0;
-                                 switch (color_index)
-                                 {
-                                 case 0:
-                                     rgb_led_strip_->SetAllColor({255, 0, 255}); // 紫色
-                                     break;
-                                 case 1:
-                                     rgb_led_strip_->SetAllColor({0, 255, 0}); // 绿色
-                                     break;
-                                 case 2:
-                                     rgb_led_strip_->SetAllColor({255, 255, 0}); // 黄色
-                                     break;
-                                 case 3:
-                                     rgb_led_strip_->SetAllColor({0, 0, 255}); // 蓝色
-                                     break;
-                                 case 4:
-                                     rgb_led_strip_->SetAllColor({255, 165, 0}); // 橙色
-                                     break;
-                                 case 5:
-                                     rgb_led_strip_->SetAllColor({0, 255, 255}); // 青色
-                                     break;
-                                 default:
-                                     rgb_led_strip_->SetAllColor({255, 255, 255}); // 白色
-                                     break;
-                                 }
-                                 color_index = (color_index + 1) % 7; // 循环使用7种颜色
+                                //  servo_controller_.SetAngle(45);
+                                //  // 延时500ms后返回到90度位置
+                                //  vTaskDelay(pdMS_TO_TICKS(500));
+                                //  servo_controller_.SetAngle(90);
+                                //  // 循环切换RGB灯带颜色
+                                //  static int color_index = 0;
+                                //  switch (color_index)
+                                //  {
+                                //  case 0:
+                                //      rgb_led_strip_->SetAllColor({255, 0, 255}); // 紫色
+                                //      break;
+                                //  case 1:
+                                //      rgb_led_strip_->SetAllColor({0, 255, 0}); // 绿色
+                                //      break;
+                                //  case 2:
+                                //      rgb_led_strip_->SetAllColor({255, 255, 0}); // 黄色
+                                //      break;
+                                //  case 3:
+                                //      rgb_led_strip_->SetAllColor({0, 0, 255}); // 蓝色
+                                //      break;
+                                //  case 4:
+                                //      rgb_led_strip_->SetAllColor({255, 165, 0}); // 橙色
+                                //      break;
+                                //  case 5:
+                                //      rgb_led_strip_->SetAllColor({0, 255, 255}); // 青色
+                                //      break;
+                                //  default:
+                                //      rgb_led_strip_->SetAllColor({255, 255, 255}); // 白色
+                                //      break;
+                                //  }
+                                //  color_index = (color_index + 1) % 7; // 循环使用7种颜色
 
                                  auto &app = Application::GetInstance();
                                  app.ToggleChatState(); // 切换聊天状态（打断）
