@@ -10,6 +10,7 @@
 #include <mutex>
 #include <deque>
 #include <memory>
+#include <functional>
 
 #include "protocol.h"
 #include "ota.h"
@@ -64,7 +65,14 @@ public:
     void Run();
 
     DeviceState GetDeviceState() const { return state_machine_.GetState(); }
+    DeviceStateMachine& GetStateMachine() { return state_machine_; }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
+    
+    /**
+     * Check if wake word was recently triggered
+     * Used by board to determine if state transition to Listening is wake-word-driven
+     */
+    bool IsWakeWordTriggered() const { return wake_word_triggered_; }
     
     /**
      * Request state transition
@@ -108,6 +116,7 @@ public:
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void RegisterMcpBroadcastCallback(std::function<void(const std::string&)> callback);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
@@ -136,10 +145,13 @@ private:
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
 
+    std::function<void(const std::string&)> mcp_broadcast_callback_;
+
     bool has_server_time_ = false;
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    bool wake_word_triggered_ = false;       // Flag: wake word was detected, set by HandleWakeWordDetectedEvent
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
@@ -153,6 +165,8 @@ private:
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
+    void ContinueOpenAudioChannel(ListeningMode mode);
+    void ContinueWakeWordInvoke(const std::string& wake_word);
 
     // Activation task (runs in background)
     void ActivationTask();
@@ -163,6 +177,7 @@ private:
     void InitializeProtocol();
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
+    ListeningMode GetDefaultListeningMode() const;
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);

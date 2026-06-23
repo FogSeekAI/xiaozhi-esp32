@@ -8,7 +8,8 @@
 #include <esp_partition.h>
 #include <esp_app_desc.h>
 #include <esp_ota_ops.h>
-#if CONFIG_IDF_TARGET_ESP32P4
+#include <esp_pm.h>
+#if CONFIG_IDF_TARGET_ESP32P4 && !CONFIG_XIAOZHI_USE_ETHERNET
 #include "esp_wifi_remote.h"
 #endif
 
@@ -33,7 +34,9 @@ size_t SystemInfo::GetFreeHeapSize() {
 
 std::string SystemInfo::GetMacAddress() {
     uint8_t mac[6];
-#if CONFIG_IDF_TARGET_ESP32P4
+#if CONFIG_XIAOZHI_USE_ETHERNET
+    esp_read_mac(mac, ESP_MAC_ETH);
+#elif CONFIG_IDF_TARGET_ESP32P4
     esp_wifi_get_mac(WIFI_IF_STA, mac);
 #else
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -148,4 +151,8 @@ void SystemInfo::PrintHeapStats() {
     int free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     int min_free_sram = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "free sram: %u minimal sram: %u", free_sram, min_free_sram);
+}
+
+void SystemInfo::PrintPmLocks() {
+    esp_pm_dump_locks(stdout);
 }

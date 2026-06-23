@@ -76,24 +76,26 @@ private:
     void InitializeDisplayManager()
     {
         lcd_pin_config_t lcd_pin_config = {
-            .io0_gpio = LCD_IO0_GPIO,
-            .io1_gpio = LCD_IO1_GPIO,
-            .scl_gpio = LCD_SCL_GPIO,
-            .io2_gpio = LCD_IO2_GPIO,
-            .io3_gpio = LCD_IO3_GPIO,
-            .cs_gpio = LCD_CS_GPIO,
-            .dc_gpio = LCD_DC_GPIO,
-            .reset_gpio = LCD_RESET_GPIO,
-            .im0_gpio = LCD_IM0_GPIO,
-            .im2_gpio = LCD_IM2_GPIO,
-            .bl_gpio = LCD_BL_GPIO,
+            .qspi_d0_gpio = LCD_IO0_GPIO,
+            .qspi_d1_gpio = LCD_IO1_GPIO,
+            .qspi_d2_gpio = LCD_IO2_GPIO,
+            .qspi_d3_gpio = LCD_IO3_GPIO,
+            .qspi_cs_gpio = LCD_CS_GPIO,
+            .qspi_sclk_gpio = LCD_SCL_GPIO,
+            .qspi_im0_gpio = LCD_IM0_GPIO,
+            .qspi_im2_gpio = LCD_IM2_GPIO,
+            .spi_dc_gpio = LCD_DC_GPIO,
+            .spi_reset_gpio = LCD_RESET_GPIO,
+            .spi_bl_gpio = LCD_BL_GPIO,
             .width = LCD_H_RES,
             .height = LCD_V_RES,
             .offset_x = DISPLAY_OFFSET_X,
             .offset_y = DISPLAY_OFFSET_Y,
             .mirror_x = DISPLAY_MIRROR_X,
             .mirror_y = DISPLAY_MIRROR_Y,
-            .swap_xy = DISPLAY_SWAP_XY};
+            .swap_xy = DISPLAY_SWAP_XY,
+            .rotation=DISPLAY_ROTATION,
+        };
         display_manager_.Initialize(BOARD_LCD_TYPE, &lcd_pin_config);
     }
 
@@ -114,25 +116,6 @@ private:
     void SetAudioAmplifierState(bool enable)
     {
         gpio_set_level(AUDIO_CODEC_PA_PIN, enable ? 1 : 0);
-    }
-
-    // 初始化扩展板电源使能引脚
-    void InitializeExtensionPowerEnable()
-    {
-        gpio_config_t io_conf;
-        io_conf.intr_type = GPIO_INTR_DISABLE;
-        io_conf.mode = GPIO_MODE_OUTPUT;
-        io_conf.pin_bit_mask = (1ULL << EXTENSION_POWER_ENABLE_GPIO);
-        io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-        gpio_config(&io_conf);
-        SetExtensionPowerEnableState(false); // 默认关闭扩展板电源使能
-    }
-
-    // 设置扩展板电源使能状态
-    void SetExtensionPowerEnableState(bool enable)
-    {
-        gpio_set_level(EXTENSION_POWER_ENABLE_GPIO, enable ? 1 : 0);
     }
 
     // 初始化按键回调
@@ -201,12 +184,11 @@ private:
     {
         power_manager_.PowerOn();                        // 更新电源状态
         led_controller_.UpdateLedStatus(power_manager_); // 更新LED灯状态
+        display_manager_.SetBrightness(100);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(70); // 开机后将音量设置为默认值
         SetAudioAmplifierState(true);
-
-        SetExtensionPowerEnableState(true); // 开机时打开扩展板电源使能
 
         ESP_LOGI(TAG, "Device powered on.");
 
@@ -216,10 +198,9 @@ private:
     // 关机流程
     void PowerOff()
     {
-        SetExtensionPowerEnableState(false); // 关机时关闭扩展板电源使能
-
         power_manager_.PowerOff();
         led_controller_.UpdateLedStatus(power_manager_);
+        display_manager_.SetBrightness(0);
 
         auto codec = GetAudioCodec();
         codec->SetOutputVolume(0); // 关机后将音量设置为默0
@@ -238,7 +219,6 @@ public:
         InitializeLedController();
         InitializeDisplayManager();
         InitializeAudioAmplifier();
-        InitializeExtensionPowerEnable();
         InitializeButtonCallbacks();
 
         // 设置电源状态变化回调函数，充电时，充电状态变化更新指示灯

@@ -88,14 +88,19 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
     esp_timer_create(&preview_timer_args, &preview_timer_);
 }
 
+static bool lvgl_core_initialized = false;
+static int current_instance = 0;
 SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
                            int width, int height, int offset_x, int offset_y, bool mirror_x, bool mirror_y, bool swap_xy)
     : LcdDisplay(panel_io, panel, width, height) {
+    current_instance++;
 
     // draw white
-    std::vector<uint16_t> buffer(width_, 0xFFFF);
-    for (int y = 0; y < height_; y++) {
-        esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
+    if (current_instance == 1) {
+        std::vector<uint16_t> buffer(width_, 0xFFFF);
+        for (int y = 0; y < height_; y++) {
+            esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
+        }
     }
 
     // Set the display to on
@@ -109,30 +114,31 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
         }
     }
 
-    ESP_LOGI(TAG, "Initialize LVGL library");
-    lv_init();
-
-#if CONFIG_SPIRAM
-    // lv image cache, currently only PNG is supported
-    size_t psram_size_mb = esp_psram_get_size() / 1024 / 1024;
-    if (psram_size_mb >= 8) {
-        lv_image_cache_resize(2 * 1024 * 1024, true);
-        ESP_LOGI(TAG, "Use 2MB of PSRAM for image cache");
-    } else if (psram_size_mb >= 2) {
-        lv_image_cache_resize(512 * 1024, true);
-        ESP_LOGI(TAG, "Use 512KB of PSRAM for image cache");
+    if (!lvgl_core_initialized) {
+        ESP_LOGI(TAG, "Initialize LVGL library");
+        lv_init();
     }
+#if CONFIG_SPIRAM
+        // lv image cache, currently only PNG is supported
+        size_t psram_size_mb = esp_psram_get_size() / 1024 / 1024;
+        if (psram_size_mb >= 8) {
+            //lv_image_cache_resize(2 * 1024 * 1024, true);
+            ESP_LOGI(TAG, "Use 2MB of PSRAM for image cache");
+        } else if (psram_size_mb >= 2) {
+            //lv_image_cache_resize(512 * 1024, true);
+            ESP_LOGI(TAG, "Use 512KB of PSRAM for image cache");
+        }
 #endif
 
-    ESP_LOGI(TAG, "Initialize LVGL port");
-    lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
-    port_cfg.task_priority = 1;
+        ESP_LOGI(TAG, "Initialize LVGL port");
+        lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+        port_cfg.task_priority = 1;
 #if CONFIG_SOC_CPU_CORES_NUM > 1
-    port_cfg.task_affinity = 1;
+        port_cfg.task_affinity = 1;
 #endif
-    lvgl_port_init(&port_cfg);
-
-    ESP_LOGI(TAG, "Adding LCD display");
+        lvgl_port_init(&port_cfg);
+        
+        lvgl_core_initialized = true;
     const lvgl_port_display_cfg_t display_cfg = {
         .io_handle = panel_io_,
         .panel_handle = panel_,
@@ -158,7 +164,10 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
             .direct_mode = 0,
         },
     };
-
+    ESP_LOGI(TAG, "=== Debug: Before lvgl_port_add_disp ===");
+    ESP_LOGI(TAG, "io_handle: %p", display_cfg.io_handle);
+    ESP_LOGI(TAG, "panel_handle: %p", display_cfg.panel_handle);
+    ESP_LOGI(TAG, "width: %d, height: %d", width, height);
     display_ = lvgl_port_add_disp(&display_cfg);
     if (display_ == nullptr) {
         ESP_LOGE(TAG, "Failed to add display");
@@ -168,8 +177,11 @@ SpiLcdDisplay::SpiLcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_h
     if (offset_x != 0 || offset_y != 0) {
         lv_display_set_offset(display_, offset_x, offset_y);
     }
-
+#if CONFIG_USE_DUAL_SCREEN ==1
+    SetupEyesUI(display_);
+#else
     SetupUI();
+#endif
 }
 
 
@@ -771,6 +783,53 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     lv_obj_scroll_to_view_recursive(img_bubble, LV_ANIM_ON);
 }
 #else
+
+void LcdDisplay::SetupEyesUI(lv_display_t * display_ ) {
+    DisplayLockGuard lock(this);
+    LvglTheme* lvgl_theme = static_cast<LvglTheme*>(current_theme_);
+    auto text_font = lvgl_theme->text_font()->font();
+    auto icon_font = lvgl_theme->icon_font()->font();
+    auto large_icon_font = lvgl_theme->large_icon_font()->font();
+
+    auto screen = lv_display_get_screen_active(display_);
+    //auto screen = lv_screen_active();
+    lv_obj_set_style_text_font(screen, text_font, 0);
+    lv_obj_set_style_text_color(screen, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_bg_color(screen, lvgl_theme->background_color(), 0);
+
+    /* Container - used as background */
+    container_ = lv_obj_create(screen);
+    lv_obj_set_size(container_, LV_HOR_RES, LV_VER_RES);
+    lv_obj_set_style_radius(container_, 0, 0);
+    lv_obj_set_style_pad_all(container_, 0, 0);
+    lv_obj_set_style_border_width(container_, 0, 0);
+    lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
+    lv_obj_set_style_border_color(container_, lvgl_theme->border_color(), 0);
+
+    /* Bottom layer: emoji_box_ - centered display */
+    emoji_box_ = lv_obj_create(screen);
+    lv_obj_set_size(emoji_box_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(emoji_box_, 0, 0);
+    lv_obj_set_style_border_width(emoji_box_, 0, 0);
+    lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, 0);
+
+    emoji_label_ = lv_label_create(emoji_box_);
+    lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
+    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(emoji_label_, FONT_AWESOME_MICROCHIP_AI);
+
+    emoji_image_ = lv_img_create(emoji_box_);
+    lv_obj_center(emoji_image_);
+    lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+
+    /* Middle layer: preview_image_ - centered display */
+    preview_image_ = lv_image_create(screen);
+    lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
+    lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+}
+
 void LcdDisplay::SetupUI() {
     DisplayLockGuard lock(this);
     LvglTheme* lvgl_theme = static_cast<LvglTheme*>(current_theme_);
@@ -1040,6 +1099,23 @@ void LcdDisplay::SetEmotion(const char* emotion) {
 }
 
 void LcdDisplay::SetTheme(Theme* theme) {
+
+#if CONFIG_USE_DUAL_SCREEN ==1
+    DisplayLockGuard lock(this);
+    
+    auto lvgl_theme = static_cast<LvglTheme*>(theme);
+
+    //lv_obj_t* screen = lv_screen_active();
+
+    if (lvgl_theme->background_image() != nullptr) {
+        lv_obj_set_style_bg_image_src(container_, lvgl_theme->background_image()->image_dsc(), 0);
+    } else {
+        lv_obj_set_style_bg_image_src(container_, nullptr, 0);
+        lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
+    }
+    Display::SetTheme(lvgl_theme);
+
+#else
     DisplayLockGuard lock(this);
     
     auto lvgl_theme = static_cast<LvglTheme*>(theme);
@@ -1089,7 +1165,7 @@ void LcdDisplay::SetTheme(Theme* theme) {
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
 
     // If we have the chat message style, update all message bubbles
-#if CONFIG_USE_WECHAT_MESSAGE_STYLE
+    #if CONFIG_USE_WECHAT_MESSAGE_STYLE
     // Set content background opacity
     lv_obj_set_style_bg_opa(content_, LV_OPA_TRANSP, 0);
 
@@ -1157,7 +1233,7 @@ void LcdDisplay::SetTheme(Theme* theme) {
             ESP_LOGW(TAG, "child[%lu] Bubble type is not found", i);
         }
     }
-#else
+    #else
     // Simple UI mode - just update the main chat message
     if (chat_message_label_ != nullptr) {
         lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
@@ -1172,13 +1248,14 @@ void LcdDisplay::SetTheme(Theme* theme) {
         lv_obj_set_style_bg_opa(bottom_bar_, LV_OPA_50, 0);
         lv_obj_set_style_bg_color(bottom_bar_, lvgl_theme->background_color(), 0);
     }
-#endif
+    #endif
     
     // Update low battery popup
     lv_obj_set_style_bg_color(low_battery_popup_, lvgl_theme->low_battery_color(), 0);
 
-    // No errors occurred. Save theme to settings
+    //No errors occurred. Save theme to settings
     Display::SetTheme(lvgl_theme);
+#endif
 }
 
 void LcdDisplay::SetHideSubtitle(bool hide) {

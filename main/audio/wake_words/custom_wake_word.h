@@ -25,6 +25,7 @@ public:
     bool Initialize(AudioCodec* codec, srmodel_list_t* models_list);
     void Feed(const std::vector<int16_t>& data);
     void OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback);
+    void OnSpeechCommandDetected(std::function<void(int command_id)> callback);
     void Start();
     void Stop();
     size_t GetFeedSize();
@@ -34,9 +35,8 @@ public:
 
 private:
     struct Command {
-        std::string command;
-        std::string text;
-        std::string action;
+        std::string command;    // pinyin string for Multinet model
+        int id;                 // -1 = wake word, 0-19 = Kconfig speech command ID
     };
 
     // multinet 相关成员变量
@@ -50,9 +50,12 @@ private:
     std::deque<Command> commands_;
  
     std::function<void(const std::string& wake_word)> wake_word_detected_callback_;
+    std::function<void(int command_id)> speech_command_callback_;
     AudioCodec* codec_ = nullptr;
     std::string last_detected_wake_word_;
     std::atomic<bool> running_ = false;
+    std::vector<int16_t> input_buffer_;
+    std::mutex input_buffer_mutex_;
 
     TaskHandle_t wake_word_encode_task_ = nullptr;
     StaticTask_t* wake_word_encode_task_buffer_ = nullptr;

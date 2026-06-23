@@ -14,7 +14,10 @@ typedef enum
     DISPLAY_TYPE_WLK_1_8_INCH,  // 沃乐康1.8英寸屏幕 (ST77916+QSPI+特殊初始化序列)
     DISPLAY_TYPE_JYC_1_5_INCH,  // 金逸晨1.5英寸屏幕 (ST77916+QSPI+特殊初始化序列)
     DISPLAY_TYPE_HXC_1_8_INCH,  // 华夏彩1.8英寸屏幕 (ST77916+QSPI+特殊初始化序列)
-    DISPLAY_TYPE_HXC_1_15_INCH, // 华夏彩1.15英寸屏幕 (ST7789+SPI+使用标准库无需初始化序列)
+    DISPLAY_TYPE_HXC_1_15_INCH, // 华夏彩1.15英寸屏幕(ST7789+SPI+使用标准库无需初始化序列)
+    DISPLAY_TYPE_JYC_0_71_INCH, // 金逸晨0.71英寸屏幕(GC9D01+SPI+使用标准库无需初始化序列)
+    DISPLAY_TYPE_JYC_2_01_INCH, // 金逸晨2.01英寸屏幕(JD9853+SPI+需初始化序列)
+    DISPLAY_TYPE_NANO_2_4_INCH  // Nano 2.4英寸屏幕 (ST7789+SPI+240x320)
 } lcd_type_t;
 
 // 通信方式枚举
@@ -28,7 +31,9 @@ typedef enum
 typedef enum
 {
     DRIVER_ST7789,
-    DRIVER_ST77916
+    DRIVER_ST77916,
+    DRIVER_GC9D01,
+    DRIVER_JD9853
 } driver_type_t;
 
 // 屏幕配置项结构
@@ -56,19 +61,14 @@ typedef struct
     int qspi_d3_gpio;   // QSPI数据线D3
     int qspi_cs_gpio;   // QSPI片选信号
     int qspi_sclk_gpio; // QSPI时钟信号
+    int qspi_im0_gpio;  //接口模式选择IM0
+    int qspi_im2_gpio;  //接口模式选择IM2
 
-    // ST7789面板驱动接口
-    int st7789_dc_gpio;     // 数据/命令选择引脚(DC)
-    int st7789_reset_gpio;  // 复位引脚(RESET)
-    int st7789_pwr_en_gpio; // 电源使能引脚(PWR_EN) - 可选
-    int st7789_bl_gpio;     // 背光控制引脚(BACKLIGHT)
-
-    // ST77916面板驱动接口
-    int st77916_dc_gpio;     // 数据/命令选择引脚(DC)
-    int st77916_reset_gpio;  // 复位引脚(RESET)
-    int st77916_pwr_en_gpio; // 电源使能引脚(PWR_EN) - 可选
-    int st77916_bl_gpio;     // 背光控制引脚(BACKLIGHT)
-    int st77916_te_gpio;     // 垂直同步信号引脚(TE) - 可选
+    int spi_dc_gpio;     // 数据/命令选择引脚(DC)
+    int spi_reset_gpio;  // 复位引脚(RESET)
+    int spi_bl_gpio;     // 背光控制引脚(BACKLIGHT)
+    int spi_pwr_en_gpio; // 电源使能引脚(PWR_EN) - 可选
+    int spi_te_gpio;     // 垂直同步信号引脚(TE) - 可选
 
     // 通用面板特性配置
     int width;     // 屏幕宽度
@@ -83,10 +83,10 @@ typedef struct
 } lcd_pin_config_t;
 
 // 通信接口抽象基类
-class ICommunicationInterface
+class ICommInterface
 {
 public:
-    virtual ~ICommunicationInterface() = default;
+    virtual ~ICommInterface() = default;
     virtual bool Initialize(esp_lcd_panel_io_handle_t *panel_io, const lcd_pin_config_t *pin_config) = 0;
 };
 
@@ -104,19 +104,18 @@ private:
     esp_lcd_panel_io_handle_t panel_io_;
     esp_lcd_panel_handle_t panel_;
     std::unique_ptr<Backlight> backlight_;
-    LcdDisplay *display_;
-
+    Display *display_;
     // 获取屏幕配置
     static const lcd_config_item_t *GetLcdConfig(lcd_type_t lcd_type);
 
     // 创建通信接口
-    std::unique_ptr<ICommunicationInterface> CreateCommunicationInterface(comm_type_t comm_type);
+    std::unique_ptr<ICommInterface> CreateCommInterface(comm_type_t comm_type);
 
     // 创建驱动接口
     std::unique_ptr<IDisplayDriver> CreateDisplayDriver(driver_type_t driver_type, lcd_type_t lcd_type);
 
     // 通用初始化流程
-    bool InitializeCommonComponents(const lcd_pin_config_t *pin_config);
+    bool InitializeComponents(const lcd_pin_config_t *pin_config);
 
 public:
     FogSeekDisplayManager();
@@ -126,8 +125,8 @@ public:
     void Initialize(lcd_type_t lcd_type, const lcd_pin_config_t *pin_config);
 
     // 获取显示对象
-    LcdDisplay *GetDisplay() { return display_; }
-
+    Display *GetDisplay() { return display_; }
+    
     // 设置亮度
     void SetBrightness(int percent);
 
