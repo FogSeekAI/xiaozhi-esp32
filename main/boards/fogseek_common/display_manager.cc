@@ -6,8 +6,15 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_interface.h>
 #include <esp_lcd_st77916.h>
+#if __has_include("boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h")
+#define HAS_DRIVER_GC9D01N 1
 #include "boards/lilygo-t-circle-s3/esp_lcd_gc9d01n.h"
+#endif
+
+#if __has_include("boards/waveshare/esp32-s3-audio-board/esp_lcd_jd9853.h")
+#define HAS_DRIVER_JD9853 1
 #include "boards/waveshare/esp32-s3-audio-board/esp_lcd_jd9853.h"
+#endif
 #include <esp_err.h>
 #include <freertos/task.h>
 #include <cstring>
@@ -519,6 +526,7 @@ static const st77916_lcd_init_cmd_t lcd_init_cmds_hxc_1_8_inch[] = {
     {0x29, (uint8_t[]){0x00}, 1, 0},
 };
 //金逸晨2.01英寸屏幕初始化命令
+#ifdef HAS_DRIVER_JD9853
 static const jd9853_lcd_init_cmd_t lcd_init_cmds_jyc_2_01_inch[] = {
     {0xDF, (uint8_t[]){0x98}, 1, 0},
     {0xDF, (uint8_t[]){0x53}, 1, 0},
@@ -628,6 +636,7 @@ static const jd9853_lcd_init_cmd_t lcd_init_cmds_jyc_2_01_inch[] = {
     {0xDE, (uint8_t[]){0x00}, 1, 0},
     {0x29, (uint8_t[]){0x00}, 1, 0},
 };
+#endif // HAS_DRIVER_JD9853
 
 
 // 配置表
@@ -655,17 +664,21 @@ static const lcd_config_item_t hxc_1_15_config = {
     .init_cmds = NULL, // 使用标准库默认初始化
     .init_cmds_size = 0};
 
+#ifdef HAS_DRIVER_GC9D01N
 static const lcd_config_item_t jyc_0_71_config = {
     .comm_type = COMM_SPI,
     .driver_type = DRIVER_GC9D01,
     .init_cmds = NULL, // 使用标准库默认初始化
     .init_cmds_size = 0};
+#endif
 
+#ifdef HAS_DRIVER_JD9853
 static const lcd_config_item_t jyc_2_01_config = {
     .comm_type = COMM_SPI,
     .driver_type = DRIVER_JD9853,
     .init_cmds = lcd_init_cmds_jyc_2_01_inch, // 使用标准库默认初始化
     .init_cmds_size = sizeof(lcd_init_cmds_jyc_2_01_inch) / sizeof(jd9853_lcd_init_cmd_t)};
+#endif
 
 static const lcd_config_item_t nano_2_4_config = {
     .comm_type = COMM_SPI,
@@ -895,6 +908,7 @@ public:
 };
 
 // GC9D01驱动实现
+#ifdef HAS_DRIVER_GC9D01N
 class Gc9d01DisplayDriver : public IDisplayDriver
 {
 private:
@@ -930,7 +944,10 @@ public:
         return true;
     }
 };
+#endif // HAS_DRIVER_GC9D01N
+
 // JD9853驱动实现
+#ifdef HAS_DRIVER_JD9853
 class Jd9853DisplayDriver : public IDisplayDriver
 {
 private:
@@ -975,6 +992,7 @@ public:
        
     }
 };
+#endif // HAS_DRIVER_JD9853
 // 构造函数
 FogSeekDisplayManager::FogSeekDisplayManager() : panel_io_(nullptr),
                                                 panel_(nullptr),
@@ -1022,9 +1040,19 @@ const lcd_config_item_t *FogSeekDisplayManager::GetLcdConfig(lcd_type_t lcd_type
     case DISPLAY_TYPE_HXC_1_15_INCH:
         return &hxc_1_15_config;
     case DISPLAY_TYPE_JYC_0_71_INCH:
+#ifdef HAS_DRIVER_GC9D01N
         return &jyc_0_71_config;
+#else
+        ESP_LOGW(TAG, "GC9D01 driver not available for JYC 0.71 inch");
+        return nullptr;
+#endif
     case DISPLAY_TYPE_JYC_2_01_INCH:
+#ifdef HAS_DRIVER_JD9853
         return &jyc_2_01_config;
+#else
+        ESP_LOGW(TAG, "JD9853 driver not available for JYC 2.01 inch");
+        return nullptr;
+#endif
     case DISPLAY_TYPE_NANO_2_4_INCH:
         return &nano_2_4_config;      
     default:
@@ -1055,9 +1083,19 @@ std::unique_ptr<IDisplayDriver> FogSeekDisplayManager::CreateDisplayDriver(drive
     case DRIVER_ST77916:
         return std::make_unique<St77916DisplayDriver>(lcd_type);
     case DRIVER_GC9D01:
+#ifdef HAS_DRIVER_GC9D01N
         return std::make_unique<Gc9d01DisplayDriver>(lcd_type);
+#else
+        ESP_LOGW(TAG, "GC9D01 driver not available");
+        return nullptr;
+#endif
     case DRIVER_JD9853:
-        return std::make_unique<Jd9853DisplayDriver>(lcd_type);        
+#ifdef HAS_DRIVER_JD9853
+        return std::make_unique<Jd9853DisplayDriver>(lcd_type);
+#else
+        ESP_LOGW(TAG, "JD9853 driver not available");
+        return nullptr;
+#endif        
     default:
         return nullptr;
     }

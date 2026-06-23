@@ -1280,10 +1280,8 @@ if(CONFIG_BOARD_TYPE_ESP_VOCAT)
 endif()
 
 idf_component_register(SRCS ${SOURCES}
-                            "boards/esp_lcd_panel_io_spi_expander/esp_lcd_panel_io_spi_expander.cc"
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${BOARD_EMBED_FILES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
-                                    "boards/esp_lcd_panel_io_spi_expander"
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
                         esp_pm
